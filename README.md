@@ -179,10 +179,9 @@ middle of the page** as a compact rounded pill (56 px, `top: 42%`), with the New
 removed and the shortcut grid sitting below it — Zen's empty canvas with Arc's command bar.
 
 Firefox focuses the address bar on a new tab and auto-opens its suggestions dropdown; that dropdown
-is collapsed while the field is empty, so a blank tab really is a pill and not a form. Start
-typing, or load a page, and the bar docks straight back into the stock toolbar with the normal
-autocomplete. Want the suggestions to stay under the floating pill while you type (Arc mode)?
-Uncomment the marked block at the end of `config/chrome/userChrome.css`.
+is collapsed while the field is empty, so a blank tab really is a pill and not a form. As soon as
+you type, the list opens **underneath** the pill (Arc/Zen behaviour) and the pill grows downwards;
+load the page and it docks back into the stock toolbar with normal autocomplete.
 
 It ships as **profile CSS**, not a patch, so it is instantly reversible:
 
@@ -198,12 +197,14 @@ It ships as **profile CSS**, not a patch, so it is instantly reversible:
 .\scripts\install-windows.bat -LowMemory
 ```
 
-Why it cannot break browsing: the pill requires **both** `#urlbar[pageproxystate="invalid"]`
-(not showing a loaded page's address) **and** an empty field (`#urlbar-input:placeholder-shown`).
-That deliberately does *not* depend on the address bar being unfocused — Firefox autofocuses it on
-a new tab, which would otherwise hide the pill — while typing in the address bar of a real page,
-opening bookmarks, or navigating never matches. It also honours
-`prefers-color-scheme` and `prefers-reduced-motion`, and Firefox only reads these files because
+Why it cannot break browsing: the pill has exactly **one** trigger — the
+`#urlbar[pageproxystate="invalid"]` attribute Firefox sets whenever the bar is not showing a loaded
+page. That is a new tab, or an address you are editing; a loaded page never matches, so navigation,
+bookmarks, downloads and autocomplete behave exactly like stock Firefox. (Earlier builds also
+required `#urlbar-input:placeholder-shown`; on a freshly opened tab the placeholder is not always
+painted yet, so that extra condition silently stopped the whole theme from applying. It is now used
+only to decide whether to collapse the empty suggestion list.) The sheet honours
+`prefers-color-scheme` and `prefers-reduced-motion`, and Firefox only reads it because
 `toolkit.legacyUserProfileCustomizations.stylesheets = true` is already set in
 `config/modules/03-cleanfox.js`.
 
@@ -212,7 +213,7 @@ Tuning or removing it:
 | Want | Do |
 | :--- | :--- |
 | Move the pill / resize it | edit `--sheepfox-pill-top` (default `42%`; use `50%` for dead-centre), `--sheepfox-pill-width`, `--sheepfox-pill-height` in your profile's `chrome/userChrome.css` |
-| Keep it floating while typing (Arc mode) | uncomment the "Arc mode" block at the bottom of `config/chrome/userChrome.css`, then reinstall |
+| Dock it the moment you type instead of expanding | uncomment the "dock while typing" block at the bottom of `config/chrome/userChrome.css`, then reinstall |
 | Shrink it back to a normal bar | delete `<profile>/chrome/userChrome.css` |
 | Keep the pill, restore the New Tab logo | delete `<profile>/chrome/userContent.css` |
 | Uninstall everything | `python3 scripts/install.py --uninstall` (removes both files) |
@@ -325,9 +326,25 @@ Run the built-in doctor first — it reports the exact profile in use and whethe
 python3 scripts/install.py --doctor
 ```
 
-It checks `user.js`, `chrome/userChrome.css`, `chrome/userContent.css`, whether
-`toolkit.legacyUserProfileCustomizations.stylesheets` is *saved* as `true` in `prefs.js`, and the
-system files (`sheepfox.cfg`, `local-settings.js`, `policies.json`).
+It checks `user.js`, `chrome/userChrome.css`, `chrome/userContent.css`, whether those copies are
+**byte-identical to this repo** (a stale file from an older version is a silent no-op), whether
+`toolkit.legacyUserProfileCustomizations.stylesheets` is *saved* as `true` in `prefs.js`, the system
+files (`sheepfox.cfg`, `local-settings.js`, `policies.json`), and whether your SheepFox files ended
+up in a **different profile than the one Firefox launches** — the single most common cause.
+
+Then prove the stylesheet is actually being read. `-Probe` writes
+`chrome/sheepfox-probe.css`, which `userChrome.css` already imports; it paints the toolbar **red**
+and gives the pill a green outline:
+
+```powershell
+.\scripts\install-windows.bat -Probe     # then quit Firefox fully and start it
+.\scripts\install-windows.bat -Unprobe   # remove the probe
+```
+
+```bash
+python3 scripts/install.py --probe
+python3 scripts/install.py --unprobe
+```
 
 | Symptom | Cause | Fix |
 | :--- | :--- | :--- |
@@ -335,8 +352,9 @@ system files (`sheepfox.cfg`, `local-settings.js`, `policies.json`).
 | Doctor passes, nothing changes | Firefox still running (config is read at startup) | quit fully — Task Manager must show no `firefox.exe` — then relaunch |
 | Doctor passes, CSS still ignored | pref saved as `false` by another hardening tool | `about:config` → `toolkit.legacyUserProfileCustomizations.stylesheets` → `true`, restart |
 | New Tab logo changed but no pill | older Firefox without `:has()` support (< 121) | upgrade, or use the `.default`-profile rules only |
-| Windows Store Firefox | profile lives under `%LOCALAPPDATA%\Packages\Mozilla.Firefox_*` | pass `-ProfilePath` explicitly |
-| Everything looks right | need proof CSS loads at all | append `#nav-bar { background: #cc0000 !important; }` to `<profile>\chrome\userChrome.css`; toolbar turns red ⇒ CSS loads, remove the line and report the selector |
+| Windows Store Firefox | profile lives under `%LOCALAPPDATA%\Packages\Mozilla.Firefox_*` | handled automatically now; `-Doctor` prints the profile it uses (override with `-ProfilePath`) |
+| Doctor flags "stale" | profile has an older copy of the CSS | re-run the installer, then restart Firefox |
+| Need proof CSS loads at all | `userChrome.css` may not be read | `.\scripts\install-windows.bat -Probe` → red toolbar ⇒ CSS loads; no colour ⇒ wrong profile or pref off. Remove with `-Unprobe` |
 
 Prove *where* your profile is:
 

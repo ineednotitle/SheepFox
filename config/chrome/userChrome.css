@@ -1,10 +1,10 @@
 /* ============================================================================
    (SheepFox) Firefox — userChrome.css
-   "Floating search" UI: on a blank/new tab the address+search bar detaches from
-   the toolbar and floats in the middle of the page as a rounded pill — the Zen /
-   Arc look. Start typing or load a page and it docks back into the stock
-   toolbar, so autocomplete, keyboard handling and every normal page behave
-   exactly like unmodified Firefox.
+   "Floating search" UI: whenever the address bar is not showing a loaded page
+   (a new tab, Ctrl+T, a blank home page) it detaches from the toolbar and
+   floats in the middle of the window as a rounded pill — the Zen / Arc look.
+   Load a page and it docks back into the stock toolbar, so normal browsing,
+   autocomplete, keyboard handling and results rendering are untouched.
 
    Requires: toolkit.legacyUserProfileCustomizations.stylesheets = true
              (already set by config/modules/03-cleanfox.js)
@@ -12,19 +12,21 @@
    Installed to: <profile>/chrome/userChrome.css
    Revert:       delete this file, or run the installer with --no-ui.
 
-   HOW IT DECIDES A TAB IS "BLANK"
-   Firefox marks the URL bar pageproxystate="invalid" whenever it is not showing
-   a loaded page's address, and #urlbar-input:placeholder-shown is true only
-   while the field is empty. Requiring BOTH means:
-     * new tab, address bar autofocused by Firefox   -> pill
-     * new tab, address bar not focused              -> pill
-     * typing in the address bar of a real page      -> untouched
-     * normal browsing, navigation, bookmarks        -> untouched
-   Firefox also opens the suggestions view on that autofocus, which is why the
-   empty-state dropdown is collapsed here: an empty new tab is a pill, not a
-   form. The :is(:not([focused]), :has(...)) form keeps a working fallback on
-   Firefox < 121, which lacks :has().
+   DIAGNOSTIC
+   The @import below loads sheepfox-probe.css. That file does not exist unless
+   you run the installer with --probe, in which case the toolbar turns red —
+   a one-glance proof that Firefox is reading this stylesheet at all. A missing
+   @import is ignored, so this line is harmless either way.
+
+   WHY THE OLD RULE FAILED
+   v1 gated everything on #urlbar-input:placeholder-shown. On a freshly opened
+   tab the placeholder is not always painted yet, so the rule never matched and
+   the bar stayed in the toolbar. Positioning is now driven by the single
+   attribute Firefox always sets for "not showing a page" —
+   [pageproxystate="invalid"] — and everything else only refines that state.
    ============================================================================ */
+
+@import url("sheepfox-probe.css");
 
 @namespace url("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul");
 
@@ -33,8 +35,9 @@
   --sheepfox-pill-width: clamp(320px, 52vw, 680px);
   --sheepfox-pill-height: 56px;
   --sheepfox-pill-radius: 28px;
-  /* Vertical position: 42% reads as "centre of the page" while leaving room
-     for the shortcut grid below. Use 50% for dead-centre. */
+  /* Centre of the pill as a percentage of the window height. 42% reads as
+     "middle of the page" while leaving room for the shortcut grid; use 50%
+     for dead-centre. */
   --sheepfox-pill-top: 42%;
   --sheepfox-pill-shadow:
     0 18px 44px rgba(0, 0, 0, 0.22),
@@ -61,26 +64,34 @@
   }
 }
 
-/* The pill is taller than a toolbar row, so stop the toolbar clipping it. */
+/* The pill is taller than a toolbar row, and it escapes both of the boxes the
+   toolbar normally clips its children to. */
+#navigator-toolbox,
 #nav-bar,
-#navigator-toolbox {
+#urlbar-container {
   overflow: visible !important;
+  contain: none !important;
 }
 
 /* ----------------------------------------------------------------------------
-   1. THE FLOATING PILL — blank tab, empty field
+   1. THE PILL SHELL
+   [pageproxystate="invalid"] means "this bar is not showing a loaded page" —
+   i.e. a new tab, or an address you are editing. That is the whole trigger:
+   no :has(), no :placeholder-shown, nothing that can silently fail to match.
    ------------------------------------------------------------------------- */
-#urlbar[pageproxystate="invalid"]:is(:not([focused]), :has(#urlbar-input:placeholder-shown)) {
+#urlbar[pageproxystate="invalid"] {
   position: fixed !important;
-  top: var(--sheepfox-pill-top) !important;
+  /* Centre the 56px pill on --sheepfox-pill-top, but anchor its TOP edge so
+     that when the suggestion list opens it grows downwards instead of
+     dragging the field up towards the toolbar. */
+  top: calc(var(--sheepfox-pill-top) - var(--sheepfox-pill-height) / 2) !important;
   left: 50% !important;
   right: auto !important;
-  transform: translate(-50%, -50%) !important;
+  bottom: auto !important;
+  transform: translateX(-50%) !important;
   width: var(--sheepfox-pill-width) !important;
   min-width: var(--sheepfox-pill-width) !important;
   max-width: var(--sheepfox-pill-width) !important;
-  /* Lock the height even when Firefox breaks the bar out for the dropdown:
-     an empty new tab is a pill, not an expanded form. */
   height: var(--sheepfox-pill-height) !important;
   min-height: var(--sheepfox-pill-height) !important;
   max-height: var(--sheepfox-pill-height) !important;
@@ -89,16 +100,25 @@
   border-radius: var(--sheepfox-pill-radius) !important;
   background: var(--sheepfox-pill-bg) !important;
   box-shadow: var(--sheepfox-pill-shadow) !important;
-  z-index: 20 !important;
+  z-index: 2147483647 !important;
   transition:
     box-shadow var(--sheepfox-pill-speed) ease,
     transform var(--sheepfox-pill-speed) ease !important;
 }
 
+/* Once you type, Firefox sets [breakout-extend] and renders the suggestion
+   list inside the bar. Let the pill grow downwards — capped so it can never
+   run off the bottom of the window. */
+#urlbar[pageproxystate="invalid"][breakout-extend] {
+  height: auto !important;
+  max-height: 62vh !important;
+}
+
 /* Firefox paints the bar's surface on #urlbar-background, not #urlbar, so the
-   pill's fill/border/radius must be applied there too. */
-#urlbar[pageproxystate="invalid"]:is(:not([focused]), :has(#urlbar-input:placeholder-shown)) #urlbar-background {
-  height: var(--sheepfox-pill-height) !important;
+   fill/border/radius must be applied there too — otherwise the pill renders as
+   a transparent outline. */
+#urlbar[pageproxystate="invalid"] #urlbar-background {
+  height: 100% !important;
   border: 1px solid var(--sheepfox-pill-border) !important;
   border-radius: var(--sheepfox-pill-radius) !important;
   background: var(--sheepfox-pill-bg) !important;
@@ -106,16 +126,31 @@
   outline: none !important;
 }
 
-/* Collapse the suggestions panel that Firefox auto-opens when it focuses the
-   address bar on a new tab. It returns the moment you type (the field is no
-   longer empty, so none of these rules apply). */
+/* ----------------------------------------------------------------------------
+   2. AN EMPTY NEW TAB IS A PILL, NOT A FORM
+   Firefox focuses the address bar on a new tab and auto-opens the results view.
+   While the field is empty, that view is collapsed. Typing brings it straight
+   back (the field is no longer empty, so this rule stops applying).
+   ------------------------------------------------------------------------- */
 #urlbar[pageproxystate="invalid"]:has(#urlbar-input:placeholder-shown) #urlbar-results,
 #urlbar[pageproxystate="invalid"]:has(#urlbar-input:placeholder-shown) .urlbarView {
   display: none !important;
 }
 
-/* Inner padding + a comfortable hit area for the taller pill. */
-#urlbar[pageproxystate="invalid"]:is(:not([focused]), :has(#urlbar-input:placeholder-shown)) .urlbar-input-container {
+/* Geometry for the suggestion list while it is open. */
+#urlbar[pageproxystate="invalid"] #urlbar-results {
+  margin: 8px 0 10px !important;
+}
+
+#urlbar[pageproxystate="invalid"] .urlbarView {
+  max-height: 52vh !important;
+  overflow-y: auto !important;
+}
+
+/* ----------------------------------------------------------------------------
+   3. INNER LAYOUT
+   ------------------------------------------------------------------------- */
+#urlbar[pageproxystate="invalid"] .urlbar-input-container {
   height: var(--sheepfox-pill-height) !important;
   padding-inline: 22px 18px !important;
   border: none !important;
@@ -123,60 +158,60 @@
   align-items: center !important;
 }
 
-/* Bigger, centred placeholder: reads as a search field, like Arc/Zen. */
-#urlbar[pageproxystate="invalid"]:is(:not([focused]), :has(#urlbar-input:placeholder-shown)) #urlbar-input {
+#urlbar[pageproxystate="invalid"] #urlbar-input {
   font-size: 16px !important;
   text-align: center !important;
   color: var(--sheepfox-pill-text) !important;
 }
 
-#urlbar[pageproxystate="invalid"]:is(:not([focused]), :has(#urlbar-input:placeholder-shown)) #urlbar-input::placeholder {
+#urlbar[pageproxystate="invalid"] #urlbar-input::placeholder {
   text-align: center !important;
   opacity: 0.72 !important;
 }
 
-/* Keep the pill clean on a blank tab: no shield, no page-action clutter. */
-#urlbar[pageproxystate="invalid"]:is(:not([focused]), :has(#urlbar-input:placeholder-shown)) #identity-box,
-#urlbar[pageproxystate="invalid"]:is(:not([focused]), :has(#urlbar-input:placeholder-shown)) #page-action-buttons,
-#urlbar[pageproxystate="invalid"]:is(:not([focused]), :has(#urlbar-input:placeholder-shown)) .urlbar-go-button,
-#urlbar[pageproxystate="invalid"]:is(:not([focused]), :has(#urlbar-input:placeholder-shown)) .urlbar-icon-wrapper {
+/* Keep the pill clean: no shield, no page-action clutter. */
+#urlbar[pageproxystate="invalid"] #identity-box,
+#urlbar[pageproxystate="invalid"] #page-action-buttons,
+#urlbar[pageproxystate="invalid"] .urlbar-go-button,
+#urlbar[pageproxystate="invalid"] .urlbar-icon-wrapper {
   display: none !important;
 }
 
-/* Subtle lift on hover (a hint that it is one big target). */
-#urlbar[pageproxystate="invalid"]:is(:not([focused]), :has(#urlbar-input:placeholder-shown)):hover {
+/* Subtle lift on hover — a hint that it is one big target. */
+#urlbar[pageproxystate="invalid"]:hover {
   box-shadow: var(--sheepfox-pill-shadow-hover) !important;
-  transform: translate(-50%, -50%) scale(1.012) !important;
+  transform: translateX(-50%) scale(1.012) !important;
 }
 
-/* Make the toolbar itself recede on a blank tab, so the pill reads as floating
-   on the page rather than sitting in a strip. */
-#nav-bar:has(#urlbar[pageproxystate="invalid"]:is(:not([focused]), :has(#urlbar-input:placeholder-shown))) {
+/* Make the toolbar itself recede while the pill is out, so it reads as
+   floating on the page rather than sitting in a strip. */
+#nav-bar:has(#urlbar[pageproxystate="invalid"]) {
   background: transparent !important;
   border-color: transparent !important;
   box-shadow: none !important;
 }
 
 /* ----------------------------------------------------------------------------
-   2. OPT-IN — "Arc mode": keep the bar floating while you type
-   Uncomment this block if you prefer the pill to stay centred with the results
-   list growing underneath it. Off by default because the stock dropdown
-   geometry is safer across Firefox versions.
+   4. OPT-OUT — "dock while typing"
+   Uncomment if you prefer the bar to snap back into the toolbar the moment you
+   start typing instead of staying centred with the results open under it.
    ------------------------------------------------------------------------- */
 /*
-#urlbar[pageproxystate="invalid"]:has(#urlbar-input:placeholder-shown) #urlbar-results,
-#urlbar[pageproxystate="invalid"]:has(#urlbar-input:placeholder-shown) .urlbarView {
-  display: flex !important;
-}
-#urlbar[breakout-extend] {
+#urlbar[pageproxystate="invalid"][breakout-extend] {
+  position: relative !important;
+  top: auto !important;
+  left: auto !important;
+  transform: none !important;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
   height: auto !important;
-  max-height: 70vh !important;
-  overflow: visible !important;
+  max-height: none !important;
 }
 */
 
 /* ----------------------------------------------------------------------------
-   3. POLISH
+   5. POLISH
    ------------------------------------------------------------------------- */
 /* Keep the bar on its own compositor layer so the pill transition stays smooth
    on 120Hz/144Hz/240Hz panels instead of re-rasterising the toolbar. */
@@ -187,7 +222,7 @@
 /* Respect the OS reduced-motion setting. */
 @media (prefers-reduced-motion: reduce) {
   #urlbar,
-  #urlbar[pageproxystate="invalid"]:is(:not([focused]), :has(#urlbar-input:placeholder-shown)) {
+  #urlbar[pageproxystate="invalid"] {
     transition: none !important;
   }
 }

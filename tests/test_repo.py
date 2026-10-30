@@ -295,15 +295,17 @@ class TestFloatingSearchUI(unittest.TestCase):
 
     def test_pill_is_scoped_to_blank_tabs(self) -> None:
         css = read(self.CHROME)
-        selector = '#urlbar[pageproxystate="invalid"]:is(:not([focused]), :has(#urlbar-input:placeholder-shown))'
-        self.assertIn(selector, css, msg="pill must only match a blank tab")
-        # Must not depend on the address bar being unfocused: Firefox autofocuses
-        # it on a new tab, which would otherwise hide the pill.
-        self.assertIn(":has(#urlbar-input:placeholder-shown)", css)
-        self.assertIn("position: fixed", css)
-        self.assertIn("translate(-50%, -50%)", css, msg="pill must be centred in both axes")
-        self.assertIn("border-radius: var(--sheepfox-pill-radius)", css)
-        self.assertIn("box-shadow", css)
+        # Positioning hangs off the single attribute Firefox always sets when the
+        # bar is not showing a loaded page. Gating it on :has()/:placeholder-shown
+        # is what made v1 silently do nothing, so the shell rule must be bare.
+        self.assertIn('#urlbar[pageproxystate="invalid"] {', css, msg="pill must have a bare shell rule")
+        shell = css.split('#urlbar[pageproxystate="invalid"] {', 1)[1].split("}", 1)[0]
+        self.assertIn("position: fixed", shell)
+        self.assertNotIn(":has(", shell)
+        self.assertNotIn("placeholder-shown", shell)
+        self.assertIn("translateX(-50%)", shell, msg="pill must be centred horizontally")
+        self.assertIn("border-radius: var(--sheepfox-pill-radius)", shell)
+        self.assertIn("box-shadow", shell)
         self.assertIn("clamp(", css, msg="pill width must be responsive")
         # Never hide or disable the address bar itself.
         self.assertNotRegex(css, r"#urlbar\s*\{[^}]*display:\s*none")
@@ -311,11 +313,20 @@ class TestFloatingSearchUI(unittest.TestCase):
     def test_pill_is_vertically_centred_and_compact(self) -> None:
         css = read(self.CHROME)
         # Zen/Arc look: centred in the page, not pinned to the toolbar row.
-        self.assertIn("translate(-50%, -50%)", css)
         self.assertIn("--sheepfox-pill-top: 42%", css)
         self.assertIn("--sheepfox-pill-height: 56px", css)
-        # Height is locked so the auto-opened dropdown cannot balloon the pill.
+        # Centred on --sheepfox-pill-top while keeping the TOP edge anchored, so
+        # the suggestion list grows downwards instead of dragging the field up.
+        self.assertIn(
+            "top: calc(var(--sheepfox-pill-top) - var(--sheepfox-pill-height) / 2)",
+            css,
+            msg="pill vertical anchor must stay centred but top-anchored",
+        )
+        # Collapsed state is locked to 56px so the auto-opened dropdown cannot
+        # balloon it; [breakout-extend] may grow it again while typing.
         self.assertIn("max-height: var(--sheepfox-pill-height)", css)
+        self.assertIn('#urlbar[pageproxystate="invalid"][breakout-extend]', css)
+        self.assertIn("max-height: 62vh", css)
 
     def test_empty_new_tab_collapses_the_suggestions_panel(self) -> None:
         # Firefox opens the awesomebar results view on the new-tab autofocus;
@@ -324,8 +335,24 @@ class TestFloatingSearchUI(unittest.TestCase):
         self.assertIn("#urlbar-results", css)
         hidden = css.split("#urlbar-results", 1)[1].split("}", 1)[0]
         self.assertIn("display: none", hidden)
-        # "Arc mode" (keep the panel while floating) ships commented out.
-        self.assertIn("/*\n#urlbar[pageproxystate=\"invalid\"]:has(#urlbar-input:placeholder-shown) #urlbar-results", css)
+        # The opt-out ("dock while typing") ships commented out, so the default
+        # stays the Zen/Arc behaviour.
+        self.assertIn('/*\n#urlbar[pageproxystate="invalid"][breakout-extend] {', css)
+        self.assertIn("position: relative !important;", css)
+
+    def test_stylesheet_imports_the_probe(self) -> None:
+        css = read(self.CHROME)
+        self.assertIn('@import url("sheepfox-probe.css");', css)
+        # @import must precede @namespace or the rule is dropped.
+        self.assertLess(css.index("@import"), css.index("@namespace"))
+
+    def test_installers_can_write_and_remove_the_probe(self) -> None:
+        installer = read(REPO_ROOT / "scripts" / "install.py")
+        for token in ("--probe", "--unprobe", "sheepfox-probe.css", "#cc0000"):
+            self.assertIn(token, installer)
+        ps1 = (REPO_ROOT / "scripts" / "install-windows.ps1").read_text(encoding="utf-8")
+        for token in ("[switch]$Probe", "[switch]$Unprobe", "sheepfox-probe.css", "#cc0000"):
+            self.assertIn(token, ps1)
 
     def test_dark_mode_and_reduced_motion(self) -> None:
         css = read(self.CHROME)
@@ -779,6 +806,64 @@ class TestInstallers(unittest.TestCase):
         self.assertIn("[switch]$Doctor", text)
         self.assertIn("Report-Check", text)
         self.assertIn("prefs.js", text)
+
+    def test_probe_round_trip(self) -> None:
+        """--probe must produce a file the stylesheet imports, and --unprobe clears it."""
+        installer = REPO_ROOT / "scripts" / "install.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "profile"
+            profile.mkdir()
+            subprocess.run(
+                [sys.executable, str(installer), "--profile", str(profile)],
+                capture_output=True,
+                check=True,
+            )
+            probe = profile / "chrome" / "sheepfox-probe.css"
+            self.assertFalse(probe.exists(), "the probe must not ship by default")
+
+            add = subprocess.run(
+                [sys.executable, str(installer), "--profile", str(profile), "--probe"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(add.returncode, 0, msg=add.stderr)
+            self.assertTrue(probe.is_file())
+            text = probe.read_text(encoding="utf-8")
+            self.assertIn("#cc0000", text)
+            self.assertFalse(probe.read_bytes().startswith(b"\xef\xbb\xbf"))
+
+            remove = subprocess.run(
+                [sys.executable, str(installer), "--profile", str(profile), "--unprobe"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(remove.returncode, 0, msg=remove.stderr)
+            self.assertFalse(probe.exists())
+
+    def test_doctor_flags_a_stale_stylesheet(self) -> None:
+        installer = REPO_ROOT / "scripts" / "install.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "profile"
+            profile.mkdir()
+            subprocess.run(
+                [sys.executable, str(installer), "--profile", str(profile)],
+                capture_output=True,
+                check=True,
+            )
+            (profile / "chrome" / "userChrome.css").write_text(
+                "/* an old copy */\n#urlbar[pageproxystate=\"invalid\"] { position: fixed; }\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [sys.executable, str(installer), "--profile", str(profile), "--doctor"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 1, msg=result.stdout)
+            self.assertIn("stale", result.stdout)
 
     def test_unix_wrapper_delegates_to_python(self) -> None:
         wrapper = read(REPO_ROOT / "scripts" / "install-unix.sh")

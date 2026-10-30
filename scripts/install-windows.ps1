@@ -43,6 +43,13 @@
 .PARAMETER FirefoxDir
   Explicit Firefox installation directory (default: auto-detected).
 
+.PARAMETER Probe
+  Write chrome\sheepfox-probe.css, which turns the toolbar red. Start Firefox,
+  open a new tab: red toolbar = the stylesheet is loaded. Remove with -Unprobe.
+
+.PARAMETER Unprobe
+  Delete the file written by -Probe.
+
 .EXAMPLE
   .\scripts\install-windows.bat
 
@@ -62,6 +69,8 @@ param(
     [switch]$NoUI,
     [switch]$Doctor,
     [switch]$LowMemory,
+    [switch]$Probe,
+    [switch]$Unprobe,
     [string]$ProfilePath = "",
     [string]$FirefoxDir = "",
     # Catches stray tokens (for example a '::' comment copied from cmd.exe docs)
@@ -266,6 +275,8 @@ $LocalSettingsSrc = Join-Path $RepoRoot "config\autoconfig\defaults\pref\local-s
 $ChromeSrcDir = Join-Path $RepoRoot "config\chrome"
 # Profile-level CSS: the floating Zen/Arc-style new-tab search pill.
 $UiFiles = @("userChrome.css", "userContent.css")
+# Optional probe that userChrome.css @imports; proves the stylesheet is read.
+$ProbeFile = "sheepfox-probe.css"
 
 if (-not (Test-Path $UserJsSrc)) {
     Write-SheepFox "[error] config\user.js is missing. Run 'python mozbuild\scripts\build-configs.py' first." "Red"
@@ -275,8 +286,29 @@ if (-not (Test-Path $UserJsSrc)) {
 Write-SheepFox "=== (SheepFox) Firefox Windows Installer ===" "Cyan"
 
 if (-not $ProfilePath) {
-    $profilesIni = Join-Path $env:APPDATA "Mozilla\Firefox\profiles.ini"
-    $ProfilePath = Resolve-ProfileFromIni -IniPath $profilesIni
+    $profileRoots = @()
+    if ($env:APPDATA) { $profileRoots += (Join-Path $env:APPDATA "Mozilla\Firefox") }
+    # Microsoft Store (MSIX) builds redirect AppData, so their profile lives in
+    # a package-specific folder. This is the usual reason a theme "does nothing".
+    if ($env:LOCALAPPDATA) {
+        $packages = Join-Path $env:LOCALAPPDATA "Packages"
+        if (Test-Path $packages) {
+            foreach ($dir in (Get-ChildItem -Path $packages -Directory -Filter "Mozilla.Firefox_*" -ErrorAction SilentlyContinue)) {
+                $profileRoots += (Join-Path $dir.FullName "LocalCache\Roaming\Mozilla\Firefox")
+            }
+        }
+    }
+    # installs.ini records which profile this install actually opens.
+    foreach ($root in $profileRoots) {
+        if ($ProfilePath) { break }
+        $installIni = Join-Path $root "installs.ini"
+        if (Test-Path $installIni) { $ProfilePath = Resolve-ProfileFromIni -IniPath $installIni }
+    }
+    foreach ($root in $profileRoots) {
+        if ($ProfilePath) { break }
+        $profilesIni = Join-Path $root "profiles.ini"
+        if (Test-Path $profilesIni) { $ProfilePath = Resolve-ProfileFromIni -IniPath $profilesIni }
+    }
 }
 if (-not $FirefoxDir) {
     $FirefoxDir = Resolve-FirefoxDir -Explicit ""
@@ -285,6 +317,52 @@ if (-not $FirefoxDir) {
 Write-SheepFox ("Profile : " + $(if ($ProfilePath) { $ProfilePath } else { "not found (pass -ProfilePath)" }))
 Write-SheepFox ("Install : " + $(if ($FirefoxDir) { $FirefoxDir } else { "not found (pass -FirefoxDir)" }))
 Write-Host ""
+
+# --------------------------------------------------------------------------
+# Probe / unprobe (proves userChrome.css is being read)
+# --------------------------------------------------------------------------
+if ($Probe -or $Unprobe) {
+    if (-not $ProfilePath -or -not (Test-Path $ProfilePath)) {
+        Write-SheepFox "[error] No Firefox profile to write into. Pass -ProfilePath <dir>." "Red"
+        exit 1
+    }
+    $probePath = Join-Path $ProfilePath "chrome\$ProbeFile"
+    if ($Unprobe) {
+        if (Test-Path $probePath) {
+            if ($DryRun) {
+                Write-SheepFox "  [dry-run] would remove $probePath"
+            } else {
+                Remove-Item -Path $probePath -Force
+                Write-SheepFox "  [removed] $probePath" "Green"
+            }
+        } else {
+            Write-SheepFox "  [info] no probe file present."
+        }
+        exit 0
+    }
+    $probeCss = @"
+/* (SheepFox) CSS load probe - written by -Probe, removed by -Unprobe.
+   A RED toolbar means Firefox is reading userChrome.css from this profile. */
+#nav-bar {
+  background: #cc0000 !important;
+}
+#urlbar {
+  outline: 3px solid #00ff88 !important;
+  outline-offset: -3px !important;
+}
+"@
+    if ($DryRun) {
+        Write-SheepFox "  [dry-run] would write $probePath"
+    } else {
+        Write-Utf8NoBom -Path $probePath -Content $probeCss
+        Write-SheepFox "  [write] $probePath" "Green"
+        Write-Host ""
+        Write-SheepFox "  Now QUIT Firefox completely (Task Manager: no firefox.exe), start it and" "Cyan"
+        Write-SheepFox "  open a new tab: a RED toolbar means the CSS is loading." "Cyan"
+        Write-SheepFox "  Remove it with:  .\scripts\install-windows.bat -Unprobe" "Cyan"
+    }
+    exit 0
+}
 
 # --------------------------------------------------------------------------
 # Doctor
@@ -332,6 +410,42 @@ if ($Doctor) {
         Report-Check (($size -ge $pair.Min)) "chrome\$($pair.Name)" "$size bytes"
     }
 
+    foreach ($name in $UiFiles) {
+        $src = Join-Path $ChromeSrcDir $name
+        $dst = Join-Path $ProfilePath "chrome\$name"
+        if ((Test-Path $src) -and (Test-Path $dst)) {
+            $same = (Get-FileHash $src -Algorithm SHA256).Hash -eq (Get-FileHash $dst -Algorithm SHA256).Hash
+            Report-Check $same "chrome\$name matches this repo" $(if ($same) { "" } else { "stale - re-run the installer" })
+        }
+    }
+
+    if (Test-Path (Join-Path $ProfilePath "chrome\$ProbeFile")) {
+        Write-SheepFox "  [info] probe active: run -Unprobe once you have looked at the toolbar" "Gray"
+    }
+
+    # Catch the number-one cause: installed into a profile Firefox never opens.
+    if ($env:APPDATA) {
+        $ini = Join-Path $env:APPDATA "Mozilla\Firefox\profiles.ini"
+        if (Test-Path $ini) {
+            $root = Split-Path -Parent $ini
+            foreach ($section in (Read-ProfileIni -IniPath $ini)) {
+                if ($section.Name -notlike "Profile*" -or -not $section.Values.ContainsKey("Path")) { continue }
+                $candidate = if ($section.Values.ContainsKey("IsRelative") -and $section.Values["IsRelative"] -eq "0") {
+                    $section.Values["Path"]
+                } else {
+                    Join-Path $root $section.Values["Path"]
+                }
+                if (-not (Test-Path $candidate)) { continue }
+                $full = (Resolve-Path $candidate).Path
+                if ($full -eq (Resolve-Path $ProfilePath).Path) { continue }
+                if ((Test-Path (Join-Path $full "user.js")) -or (Test-Path (Join-Path $full "chrome\userChrome.css"))) {
+                    Write-SheepFox "  [warn] SheepFox files also exist in another profile: $full" "Yellow"
+                    Write-SheepFox "         Firefox launches the profile shown at the top of this report." "Yellow"
+                }
+            }
+        }
+    }
+
     $prefsJs = Join-Path $ProfilePath "prefs.js"
     $saved = $null
     if (Test-Path $prefsJs) {
@@ -360,11 +474,14 @@ if ($Doctor) {
         exit 1
     }
 
-    Write-SheepFox "  All checks passed. If the new-tab pill still does not appear:" "Cyan"
-    Write-SheepFox "    1. Quit Firefox completely (Task Manager: no firefox.exe), then start it."
-    Write-SheepFox "    2. Append  #nav-bar { background: #cc0000 !important; }  to"
-    Write-SheepFox "       <profile>\chrome\userChrome.css to prove CSS loads, then remove it."
-    Write-SheepFox "    3. about:config -> toolkit.legacyUserProfileCustomizations.stylesheets = true"
+    Write-SheepFox "  Files are in place. To prove Firefox is actually reading the stylesheet:" "Cyan"
+    Write-SheepFox "    1. .\scripts\install-windows.bat -Probe"
+    Write-SheepFox "    2. QUIT Firefox completely (Task Manager: no firefox.exe), then start it."
+    Write-SheepFox "    3. Open a new tab: RED toolbar = CSS is loading. Nothing = it is not."
+    Write-SheepFox "    4. .\scripts\install-windows.bat -Unprobe"
+    Write-SheepFox "  If the toolbar stays dark, open about:support in Firefox, compare its"
+    Write-SheepFox "  'Profile Folder' with the path above, then:"
+    Write-SheepFox "    .\scripts\install-windows.bat -ProfilePath \"<that path>\""
     exit 0
 }
 
@@ -375,7 +492,7 @@ if ($Uninstall) {
     $targets = @()
     if ($ProfilePath) {
         $targets += (Join-Path $ProfilePath "user.js")
-        foreach ($name in $UiFiles) { $targets += (Join-Path $ProfilePath "chrome\$name") }
+        foreach ($name in ($UiFiles + $ProbeFile)) { $targets += (Join-Path $ProfilePath "chrome\$name") }
     }
     if ($System -and $FirefoxDir) {
         $targets += @(

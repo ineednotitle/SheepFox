@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import configparser
+import hashlib
 import json
 import os
 import re
@@ -33,6 +34,21 @@ LOCAL_SETTINGS_SRC = REPO_ROOT / "config" / "autoconfig" / "defaults" / "pref" /
 CHROME_SRC_DIR = REPO_ROOT / "config" / "chrome"
 #: Profile-level CSS: the floating new-tab search pill (Zen/Arc style)
 UI_FILES = ("userChrome.css", "userContent.css")
+#: Optional probe that userChrome.css @imports; proves the stylesheet is read.
+PROBE_FILE = "sheepfox-probe.css"
+PROBE_CSS = """/* (SheepFox) CSS load probe.
+   Written by `install.py --probe`, removed by `--unprobe`.
+   If the toolbar of a new Firefox window is RED, Firefox is definitely reading
+   userChrome.css from this profile; if it is not, the stylesheet is not being
+   loaded at all (wrong profile, pref off, or Firefox was never restarted). */
+#nav-bar {
+  background: #cc0000 !important;
+}
+#urlbar {
+  outline: 3px solid #00ff88 !important;
+  outline-offset: -3px !important;
+}
+"""
 
 
 def candidate_profile_roots() -> list[Path]:
@@ -40,7 +56,21 @@ def candidate_profile_roots() -> list[Path]:
     home = Path.home()
     if system == "Windows":
         appdata = Path(os.environ.get("APPDATA", home / "AppData" / "Roaming"))
-        return [appdata / "Mozilla" / "Firefox"]
+        local = Path(os.environ.get("LOCALAPPDATA", home / "AppData" / "Local"))
+        roots = [appdata / "Mozilla" / "Firefox"]
+        # Microsoft Store (MSIX) builds redirect AppData, so their profile is
+        # NOT under %APPDATA%. This is the single most common reason a userChrome
+        # theme "does nothing" on Windows.
+        packages = local / "Packages"
+        if packages.is_dir():
+            for package in sorted(packages.glob("Mozilla.Firefox_*")):
+                roots.append(package / "LocalCache" / "Roaming" / "Mozilla" / "Firefox")
+        # Portable / hand-unpacked builds keep the profile next to the binary.
+        for base in ("ProgramFiles", "ProgramFiles(x86)"):
+            program_files = Path(os.environ.get(base, ""))
+            if str(program_files) and program_files.is_dir():
+                roots.append(program_files / "Mozilla Firefox" / "profile")
+        return roots
     if system == "Darwin":
         return [home / "Library" / "Application Support" / "Firefox"]
     # Linux / BSD (Standard, Flatpak, Snap)
@@ -72,8 +102,56 @@ def candidate_system_firefox_dirs() -> list[Path]:
     ]
 
 
+def read_install_defaults(root: Path) -> list[Path]:
+    """Profiles named by installs.ini — what Firefox actually opens."""
+    ini_path = root / "installs.ini"
+    if not ini_path.exists():
+        return []
+    parser = configparser.RawConfigParser()
+    try:
+        parser.read(ini_path, encoding="utf-8")
+    except configparser.Error:
+        return []
+    found = []
+    for section in parser.sections():
+        # installs.ini is [Install<hash>] -> Default=<profile path, relative>.
+        if section == "General" or not parser.has_option(section, "Default"):
+            continue
+        candidate = (root / parser.get(section, "Default")).resolve()
+        if candidate.is_dir():
+            found.append(candidate)
+    return found
+
+
+def iter_profile_dirs() -> list[Path]:
+    """Every profile directory that exists on this machine, any install type."""
+    dirs: list[Path] = []
+    for root in candidate_profile_roots():
+        ini_path = root / "profiles.ini"
+        if not ini_path.exists():
+            continue
+        parser = configparser.RawConfigParser()
+        try:
+            parser.read(ini_path, encoding="utf-8")
+        except configparser.Error:
+            continue
+        for section in parser.sections():
+            if not section.startswith("Profile") or not parser.has_option(section, "Path"):
+                continue
+            raw_path = parser.get(section, "Path")
+            is_rel = parser.get(section, "IsRelative", fallback="1") == "1"
+            prof_dir = (root / raw_path).resolve() if is_rel else Path(raw_path).resolve()
+            if prof_dir.is_dir() and prof_dir not in dirs:
+                dirs.append(prof_dir)
+    return dirs
+
+
 def detect_default_profile() -> Path | None:
     for root in candidate_profile_roots():
+        # installs.ini wins: it is the install -> profile mapping Firefox itself
+        # uses, so it is the only reliable answer when several profiles exist.
+        for candidate in read_install_defaults(root):
+            return candidate
         ini_path = root / "profiles.ini"
         if not ini_path.exists():
             continue
@@ -143,6 +221,10 @@ def pref_value_from_prefs_js(profile_dir: Path, name: str) -> object | None:
         return raw.strip('"')
 
 
+def css_hash(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else ""
+
+
 def doctor(profile_dir: Path | None, firefox_dir: Path | None) -> int:
     """Explain whether the floating-search UI can load, and why not."""
     print("=== (SheepFox) Firefox doctor ===")
@@ -167,7 +249,7 @@ def doctor(profile_dir: Path | None, firefox_dir: Path | None) -> int:
         failures += 1
         return 1
 
-    print(f"  profile   : {profile_dir}")
+    print(f"  profile   : {profile_dir}   <- Firefox is launched with this one")
 
     user_js = profile_dir / "user.js"
     report(user_js.is_file(), "user.js present")
@@ -184,6 +266,19 @@ def doctor(profile_dir: Path | None, firefox_dir: Path | None) -> int:
         size = target.stat().st_size if target.is_file() else 0
         report(target.is_file() and size >= minimum, f"chrome/{name}", f"{size} bytes")
 
+    # Is the copy in the profile the same file the repo ships? A stale copy from
+    # an older version is a classic "the CSS is there but nothing changed".
+    for name in UI_FILES:
+        src = CHROME_SRC_DIR / name
+        dst = chrome_dir / name
+        if src.is_file() and dst.is_file():
+            same = css_hash(src) == css_hash(dst)
+            report(same, f"chrome/{name} matches this repo", "stale - re-run the installer" if not same else "")
+
+    probe = chrome_dir / PROBE_FILE
+    if probe.is_file():
+        print(f"  [info] probe active: {probe} (run --unprobe once you have looked at the toolbar)")
+
     saved = pref_value_from_prefs_js(profile_dir, "toolkit.legacyUserProfileCustomizations.stylesheets")
     if saved is None:
         print("  [info] prefs.js has no saved value yet; Firefox will take it from user.js on next start")
@@ -192,6 +287,21 @@ def doctor(profile_dir: Path | None, firefox_dir: Path | None) -> int:
     else:
         report(False, "pref saved as false", "set it to true in about:config, or reinstall")
         print("         (a stale user.js or another hardening tool may have set it false)")
+
+    # Catch the number-one cause: SheepFox was installed into a profile that
+    # Firefox never opens (Store build, portable build, second profile, ...).
+    others = [d for d in iter_profile_dirs() if d.resolve() != profile_dir.resolve()]
+    stray = [d for d in others if (d / "chrome" / "userChrome.css").is_file() or (d / "user.js").is_file()]
+    if stray:
+        print()
+        print("  [WARN] Other Firefox profiles on this machine also have SheepFox files:")
+        for d in stray:
+            print(f"         {d}")
+        print("         Only the profile above is used at launch. Install into it:")
+        print(f"           python3 scripts/install.py --profile \"{profile_dir}\"")
+    if others and not stray:
+        print()
+        print(f"  [info] {len(others)} other profile(s) found, none of them modified.")
 
     if firefox_dir:
         for rel in ("sheepfox.cfg", "defaults/pref/local-settings.js", "distribution/policies.json"):
@@ -203,13 +313,15 @@ def doctor(profile_dir: Path | None, firefox_dir: Path | None) -> int:
         print("  Full reinstall:  python3 scripts/install.py [--profile DIR] [--system]")
         return 1
 
-    print("  All checks passed. If the new-tab pill still does not appear:")
-    print("    1. Quit Firefox completely (Task Manager -> no firefox.exe) and start it again.")
-    print("    2. Append this line to your profile's chrome/userChrome.css to prove CSS is")
-    print("       loading (toolbar turns red; remove it afterwards):")
-    print("         #nav-bar { background: #cc0000 !important; }")
-    print("    3. Open about:config and confirm")
-    print("       toolkit.legacyUserProfileCustomizations.stylesheets = true")
+    print("  Files are in place. To prove Firefox is actually reading the stylesheet:")
+    print("    1. python3 scripts/install.py --probe")
+    print("    2. QUIT Firefox completely (Task Manager -> no firefox.exe), then start it.")
+    print("    3. Open a new tab. The toolbar turns RED and the pill gets a green outline")
+    print("       if the CSS is loaded. Nothing changes if it is not.")
+    print("    4. python3 scripts/install.py --unprobe")
+    print("  If the toolbar stays dark, the profile above is not the one Firefox runs:")
+    print("    open about:support in Firefox and compare 'Profile Folder' with the path")
+    print("    printed at the top of this report, then reinstall with --profile <that path>.")
     return 0
 
 
@@ -258,6 +370,16 @@ def main() -> int:
         help="Diagnose why the floating-search UI (or the install) is not taking effect.",
     )
     parser.add_argument(
+        "--probe",
+        action="store_true",
+        help="Write chrome/sheepfox-probe.css (red toolbar) to prove userChrome.css is loading.",
+    )
+    parser.add_argument(
+        "--unprobe",
+        action="store_true",
+        help="Remove the file written by --probe.",
+    )
+    parser.add_argument(
         "--no-ui",
         action="store_true",
         help="Skip the chrome/userChrome.css + userContent.css floating-search theme.",
@@ -281,6 +403,28 @@ def main() -> int:
     if args.doctor:
         return doctor(profile_dir, firefox_dir)
 
+    if args.probe or args.unprobe:
+        if not profile_dir or not profile_dir.is_dir():
+            print("[ERROR] No profile to write the probe into. Pass --profile <dir>.", file=sys.stderr)
+            return 1
+        probe_path = profile_dir / "chrome" / PROBE_FILE
+        if args.unprobe:
+            if probe_path.exists():
+                if args.dry_run:
+                    print(f"  [DRY-RUN] Would remove {probe_path}")
+                else:
+                    probe_path.unlink()
+                    print(f"  [REMOVE] Removed {probe_path}")
+            else:
+                print("  [INFO]   No probe file present.")
+            return 0
+        backup_and_write(probe_path, PROBE_CSS, dry_run=args.dry_run)
+        if not args.dry_run:
+            print("\n  Now QUIT Firefox completely (Task Manager -> no firefox.exe), start it and")
+            print("  open a new tab: a RED toolbar + green pill outline means the CSS is loading.")
+            print("  Remove it with:  python3 scripts/install.py --unprobe")
+        return 0
+
     if args.uninstall:
         if profile_dir and (profile_dir / "user.js").exists():
             if args.dry_run:
@@ -289,7 +433,7 @@ def main() -> int:
                 (profile_dir / "user.js").unlink()
                 print(f"  [REMOVE] Removed {profile_dir / 'user.js'}")
         if profile_dir:
-            for name in UI_FILES:
+            for name in (*UI_FILES, PROBE_FILE):
                 target = profile_dir / "chrome" / name
                 if target.exists():
                     if args.dry_run:
