@@ -1,0 +1,6 @@
+# Test-only helpers for the SheepFox verification suite.
+# Nothing here is needed to RUN SheepFox — `python3 -m unittest discover -s tests`
+# works without them and skips the checks that need these packages.
+tinycss2>=1.2
+tree-sitter>=0.21
+tree-sitter-powershell>=0.23

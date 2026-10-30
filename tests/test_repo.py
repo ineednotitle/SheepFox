@@ -621,6 +621,124 @@ class TestWindowsLaunchers(unittest.TestCase):
         self.assertIn("exit /b", text.lower())
 
 
+class TestPowerShellSyntax(unittest.TestCase):
+    """install-windows.ps1 must be valid PowerShell before it ever runs.
+
+    A single backslash-escaped quote (`\"`) inside a double-quoted string is a
+    hard parser error in PowerShell ("The '<' operator is reserved for future
+    use") and it takes the whole script down, so the installer never runs at all.
+    PowerShell escapes with a backtick, never a backslash.
+    """
+
+    PS1 = REPO_ROOT / "scripts" / "install-windows.ps1"
+
+    @staticmethod
+    def _backslash_quotes(text: str) -> list[tuple[int, str]]:
+        return [
+            (number, line.strip())
+            for number, line in enumerate(text.splitlines(), start=1)
+            if '\\"' in line
+        ]
+
+    def test_no_backslash_escaped_quotes(self) -> None:
+        self.assertEqual(
+            self._backslash_quotes(self.PS1.read_text(encoding="utf-8")),
+            [],
+            msg="PowerShell escapes quotes with a backtick; backslash-escaped quotes are a parse error",
+        )
+
+    def test_detector_catches_the_reported_bug(self) -> None:
+        # The exact line that broke the installer on Windows.
+        historical = (
+            '    Write-SheepFox "    .\\scripts\\install-windows.bat '
+            '-ProfilePath \\"<that path>\\""'
+        )
+        self.assertEqual(len(self._backslash_quotes(historical)), 1)
+        self.assertEqual(self._backslash_quotes(self.PS1.read_text(encoding="utf-8")), [])
+
+    def test_quotes_balance_on_every_line(self) -> None:
+        for number, problem in self._scan(self.PS1.read_text(encoding="utf-8")):
+            self.fail(f"line {number}: {problem}")
+
+    @staticmethod
+    def _scan(text: str) -> list[tuple[int, str]]:
+        """Tiny PowerShell lexer: unterminated strings, comments, here-strings."""
+        problems: list[tuple[int, str]] = []
+        here_terminator: str | None = None
+        in_block_comment = False
+        for number, line in enumerate(text.splitlines(), start=1):
+            stripped = line.strip()
+            if here_terminator is not None:
+                if stripped == here_terminator:
+                    here_terminator = None
+                continue
+            if in_block_comment:
+                if "#>" in stripped:
+                    in_block_comment = False
+                continue
+            if stripped.startswith("<#"):  # comment-based help
+                if "#>" not in stripped[2:]:
+                    in_block_comment = True
+                continue
+            if stripped.endswith('@"') or stripped.endswith("@'"):
+                here_terminator = '"@' if stripped.endswith('@"') else "'@"
+                continue
+
+            state = None  # None | "squote" | "dquote"
+            index = 0
+            while index < len(line):
+                char = line[index]
+                if state is None:
+                    if char == "#":
+                        break
+                    if char == "`":
+                        index += 2
+                        continue
+                    if char == "'":
+                        state = "squote"
+                    elif char == '"':
+                        state = "dquote"
+                elif state == "squote":
+                    if char == "'":
+                        if line[index : index + 2] == "''":
+                            index += 2
+                            continue
+                        state = None
+                else:
+                    if char == "`":
+                        index += 2
+                        continue
+                    if char == '"':
+                        state = None
+                index += 1
+            if state is not None:
+                problems.append((number, f"unterminated {state} string: {line.strip()}"))
+        return problems
+
+    def test_parses_with_tree_sitter_when_available(self) -> None:
+        """A real parse, when the optional grammar is installed."""
+        try:
+            from tree_sitter import Language, Parser
+            import tree_sitter_powershell
+        except ImportError:  # pragma: no cover - optional dev dependency
+            self.skipTest("tree-sitter-powershell not installed (pip install -r requirements-dev.txt)")
+
+        parser = Parser(Language(tree_sitter_powershell.language()))
+        source = self.PS1.read_bytes()
+        tree = parser.parse(source)
+        failures = []
+        stack = [tree.root_node]
+        while stack:
+            node = stack.pop()
+            if node.type == "ERROR" or node.is_missing:
+                snippet = source[node.start_byte : node.end_byte][:60]
+                failures.append(
+                    f"line {node.start_point.row + 1}, col {node.start_point.column + 1}: {snippet!r}"
+                )
+            stack.extend(node.children)
+        self.assertEqual(failures, [], msg="install-windows.ps1 does not parse: " + "; ".join(failures))
+
+
 class TestInstallers(unittest.TestCase):
     def test_install_strict_system_and_uninstall(self) -> None:
         installer = REPO_ROOT / "scripts" / "install.py"

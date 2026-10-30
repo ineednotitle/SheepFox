@@ -47,6 +47,7 @@ Thank you for helping make **(SheepFox) Firefox** faster and more private! Every
 ```bash
 make build-configs     # regenerate user.js + sheepfox.cfg
 make check             # fail if the generated files are stale
+pip install -r requirements-dev.txt   # optional: real CSS + PowerShell parsers
 make test              # config invariants, policies, patches, launchers, installers
 make verify            # check + test, exactly what CI runs
 ```

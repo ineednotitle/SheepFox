@@ -481,7 +481,7 @@ if ($Doctor) {
     Write-SheepFox "    4. .\scripts\install-windows.bat -Unprobe"
     Write-SheepFox "  If the toolbar stays dark, open about:support in Firefox, compare its"
     Write-SheepFox "  'Profile Folder' with the path above, then:"
-    Write-SheepFox "    .\scripts\install-windows.bat -ProfilePath \"<that path>\""
+    Write-SheepFox '    .\scripts\install-windows.bat -ProfilePath "<that path>"'
     exit 0
 }
 

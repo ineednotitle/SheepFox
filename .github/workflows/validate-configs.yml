@@ -55,6 +55,11 @@ jobs:
               print(f"json ok: {path}")
           PY
 
+      - name: Install optional test helpers
+        run: |
+          python3 -m pip install --quiet --disable-pip-version-check -r requirements-dev.txt \
+            || echo "::warning::optional test helpers unavailable; those checks will be skipped"
+
       - name: Run the verification suite
         run: python3 -m unittest discover -s tests -v
 
