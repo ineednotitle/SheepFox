@@ -16,6 +16,9 @@
 
 ## What SheepFox is
 
+> **(SheepFox) Firefox — make Firefox as fast as Brave without losing stability, with
+> LibreFox-grade privacy and zero site breakage.**
+
 **(SheepFox) Firefox** — repo slug `SheepFox` — is a hybrid Firefox engineering project that fixes
 the trade-off every hardening guide forces on you:
 
