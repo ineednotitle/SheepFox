@@ -1,0 +1,70 @@
+name: Validate Configs
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Config, shell and unit-test gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify generated configs are in sync
+        run: python3 mozbuild/scripts/build-configs.py --check
+
+      - name: Rebuild configs and fail on drift
+        run: |
+          python3 mozbuild/scripts/build-configs.py
+          git diff --exit-code -- config/user.js config/autoconfig/sheepfox.cfg
+
+      - name: Syntax-check every shell script
+        run: |
+          set -euo pipefail
+          find . -path ./.git -prune -o -name '*.sh' -print | while read -r script; do
+            echo "bash -n ${script}"
+            bash -n "${script}"
+          done
+
+      - name: Validate JSON and YAML assets
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, pathlib, sys
+          for path in sorted(pathlib.Path(".").rglob("*.json")):
+              if ".git" in path.parts:
+                  continue
+              json.loads(path.read_text(encoding="utf-8"))
+              print(f"json ok: {path}")
+          PY
+
+      - name: Run the verification suite
+        run: python3 -m unittest discover -s tests -v
+
+      - name: Check Windows launchers are BOM-free
+        run: |
+          set -euo pipefail
+          for file in scripts/install-windows.bat scripts/install-windows.ps1; do
+            if head -c 3 "${file}" | od -An -tx1 | grep -q 'ef bb bf'; then
+              echo "::error file=${file}::UTF-8 BOM found; Windows tooling will break"
+              exit 1
+            fi
+            echo "no BOM: ${file}"
+          done

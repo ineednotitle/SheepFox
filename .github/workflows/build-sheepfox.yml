@@ -1,0 +1,105 @@
+name: Build SheepFox
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      pgo:
+        description: "Build with two-stage PGO (much slower)"
+        type: boolean
+        default: false
+      skip_browser:
+        description: "Only package the drop-in config (skip the Firefox compile)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-sheepfox-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  config-package:
+    name: Drop-in config package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compile and verify modular configs
+        run: |
+          python3 mozbuild/scripts/build-configs.py
+          python3 mozbuild/scripts/build-configs.py --check
+
+      - name: Assemble configuration archive
+        run: |
+          set -euo pipefail
+          mkdir -p dist/sheepfox-config
+          cp -R config scripts dist/sheepfox-config/
+          cp README.md LICENSE Makefile dist/sheepfox-config/
+          cd dist && zip -r -9 sheepfox-config.zip sheepfox-config
+
+      - name: Upload config archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: sheepfox-config
+          path: dist/sheepfox-config.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  build-linux-x86_64:
+    name: Compile SheepFox (Linux x86_64)
+    needs: config-package
+    if: github.event_name == 'push' || !inputs.skip_browser
+    runs-on: ubuntu-22.04
+    timeout-minutes: 480
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pinned Firefox sources
+        uses: actions/cache@v4
+        with:
+          path: mozbuild/firefox-*.source.tar.xz
+          key: firefox-source-${{ hashFiles('mozbuild/firefox-version.json') }}
+
+      - name: Fetch and SHA-512 verify upstream sources
+        run: bash mozbuild/scripts/fetch-source.sh
+
+      - name: Bootstrap the Gecko build environment
+        run: cd mozbuild/firefox-src && ./mach bootstrap --no-interactive --application-choice browser
+
+      - name: Inject branding, policies and patches
+        run: bash mozbuild/scripts/apply-patches.sh
+
+      - name: Compile, package and inject runtime config
+        env:
+          SHEEPFOX_PGO: ${{ inputs.pgo && '1' || '0' }}
+        run: bash mozbuild/scripts/build-browser.sh --target linux-x86_64
+
+      - name: Show package contents
+        run: ls -lh mozbuild/firefox-src/obj-*/dist/ | head -50
+
+      - name: Upload SheepFox Linux build
+        uses: actions/upload-artifact@v4
+        with:
+          name: sheepfox-linux-x86_64
+          path: |
+            mozbuild/firefox-src/obj-*/dist/firefox-*.tar.*
+            mozbuild/firefox-src/obj-*/dist/bin/sheepfox
+          if-no-files-found: warn
+          retention-days: 30
