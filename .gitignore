@@ -1,0 +1,42 @@
+# ---------------------------------------------------------------------------
+# (SheepFox) Firefox — Ignored Paths
+# ---------------------------------------------------------------------------
+
+# Python caches / virtual environments
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local, machine-specific preference overrides (copy from the example)
+config/overrides/user-overrides.js
+
+# Fork build scratch space (never commit upstream sources or build output)
+mozbuild/firefox-src/
+mozbuild/staging/
+mozbuild/pgo-profile/
+mozbuild/.last-objdir
+mozbuild/obj-*/
+mozbuild/artifacts/
+mozbuild/dist/
+mozbuild/*.tar.xz
+mozbuild/*.tar.xz.sha512
+firefox-*.source.tar.xz
+firefox-*.source.tar.xz.sha512
+SHA512SUMS
+SHA512SUMS.sign
+*.mozconfig
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+.idea/
+.vscode/
+!.vscode/extensions.json
