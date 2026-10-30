@@ -47,11 +47,30 @@ param(
     [switch]$Uninstall,
     [switch]$DryRun,
     [string]$ProfilePath = "",
-    [string]$FirefoxDir = ""
+    [string]$FirefoxDir = "",
+    # Catches stray tokens (for example a '::' comment copied from cmd.exe docs)
+    # so the user gets an actionable message instead of a binding error.
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]]$RemainingArguments
 )
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
+
+if ($RemainingArguments -and $RemainingArguments.Count -gt 0) {
+    Write-Host "[error] Unexpected arguments: $($RemainingArguments -join ' ')" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "        This usually means a documentation comment was copied along with the command." -ForegroundColor Yellow
+    Write-Host "        In PowerShell a comment starts with '#'. The '::' form is a cmd.exe-only" -ForegroundColor Yellow
+    Write-Host "        comment and becomes an argument here." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "        Try one of:" -ForegroundColor Yellow
+    Write-Host "          .\scripts\install-windows.bat" -ForegroundColor Gray
+    Write-Host "          .\scripts\install-windows.bat -System" -ForegroundColor Gray
+    Write-Host "          .\scripts\install-windows.bat -System -Strict" -ForegroundColor Gray
+    Write-Host "          .\scripts\install-windows.bat -Uninstall -System" -ForegroundColor Gray
+    exit 2
+}
 
 # --------------------------------------------------------------------------
 # Helpers

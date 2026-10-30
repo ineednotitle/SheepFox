@@ -481,6 +481,15 @@ class TestWindowsLaunchers(unittest.TestCase):
         for switch in ("$System", "$Strict", "$Uninstall", "$DryRun", "$ProfilePath", "$FirefoxDir"):
             self.assertIn(switch, text)
 
+    def test_stray_arguments_get_actionable_guidance(self) -> None:
+        # A '::' comment copied from cmd.exe docs must not produce a cryptic
+        # "positional parameter cannot be found" binding error.
+        text = self.PS1.read_text(encoding="utf-8")
+        self.assertIn("ValueFromRemainingArguments", text)
+        self.assertIn("Unexpected arguments", text)
+        self.assertIn("cmd.exe-only", text)
+        self.assertIn("exit 2", text)
+
     def test_launcher_argument_passthrough(self) -> None:
         text = self.BAT.read_text(encoding="utf-8")
         self.assertIn("%*", text)

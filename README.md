@@ -99,7 +99,7 @@ SheepFox/
 │   ├── series
 │   └── 0001…0004-*.patch
 ├── scripts/                         # install.py, install-unix.sh, install-windows.{bat,ps1}
-├── tests/test_repo.py               # 40 tests, stdlib only
+├── tests/test_repo.py               # 41 tests, stdlib only
 └── .github/workflows/               # validate-configs.yml, build-sheepfox.yml
 ```
 
@@ -136,11 +136,22 @@ sudo ./scripts/install-unix.sh --system              # + /Applications/Firefox.a
 Double-click or run the `.bat` launcher — it bypasses `ExecutionPolicy` for you, so you will
 never see *"…install-windows.ps1 is not digitally signed"*:
 
-```bat
-scripts\install-windows.bat
-scripts\install-windows.bat -System -Strict
-scripts\install-windows.bat -Uninstall -System
+```powershell
+.\scripts\install-windows.bat                       # profile only: speed + privacy
+.\scripts\install-windows.bat -System -Strict        # + AutoConfig/uBlock (UAC) and strict RFP
+.\scripts\install-windows.bat -Uninstall -System     # remove everything again
 ```
+
+> **Windows notes**
+> * Always prefix the path with `.\` in PowerShell. Without it, a missing file is interpreted as
+>   the module-qualified command `scripts\install-windows.bat` and you get the confusing
+>   *"The module 'scripts' could not be loaded"* error instead of "file not found".
+> * Comments must be `#` in PowerShell. The `::` form in older examples is a **cmd.exe-only**
+>   comment; in PowerShell it is parsed as arguments and produces
+>   *"The term 'uBlock' is not recognized…"*. Copy the commands only, never the annotation.
+> * Verify you have the current files: `Get-ChildItem .\scripts` must list
+>   `install-windows.bat`. If it does not, run `git pull` — the `.bat` launcher was added in
+>   commit `a0642a6`.
 
 The launcher calls
 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0install-windows.ps1" %*`.
@@ -162,6 +173,8 @@ python scripts\install.py --system --uninstall
 ```bash
 python3 scripts/install.py --system --uninstall     # removes what SheepFox installed
 ```
+
+On Windows: `.\scripts\install-windows.bat -Uninstall -System`
 
 Timestamped backups are always left in place; restore the newest
 `user.js.sheepfox-backup-*` to get your old profile config back.
@@ -217,7 +230,7 @@ Artifacts land in `mozbuild/firefox-src/obj-*/dist/`, with `sheepfox.cfg`,
 ```bash
 make build-configs     # regenerate user.js + sheepfox.cfg from config/modules/*.js
 make check             # fail if either generated file is stale
-make test              # 40 tests (stdlib unittest, no dependencies)
+make test              # 41 tests (stdlib unittest, no dependencies)
 make verify            # check + test
 ```
 
