@@ -183,6 +183,16 @@ is collapsed while the field is empty, so a blank tab really is a pill and not a
 you type, the list opens **underneath** the pill (Arc/Zen behaviour) and the pill grows downwards;
 load the page and it docks back into the stock toolbar with normal autocomplete.
 
+The implementation follows Zen Browser's own `floating-urlbar` theme: `position: fixed` with
+`!important` on the properties Firefox otherwise sets itself (`top`, `left`, `width`), centring done
+with `left: 50%` plus a negative inline margin rather than a transform — Firefox animates the bar
+with transforms of its own — and two trigger states (`[pageproxystate="invalid"]` for a fresh tab,
+`[breakout][breakout-extend]` for an open bar, which is what Zen gates on).
+
+The installer now writes to **every Firefox profile on the machine** (standard, Microsoft Store and
+portable roots, read from `installs.ini` first) — landing in the wrong profile is the classic reason
+a `userChrome` theme does nothing. Use `--profile` / `-ProfilePath` to target exactly one.
+
 It ships as **profile CSS**, not a patch, so it is instantly reversible:
 
 ```bash
@@ -344,6 +354,16 @@ and gives the pill a green outline:
 ```bash
 python3 scripts/install.py --probe
 python3 scripts/install.py --unprobe
+```
+
+Still stuck? Write a full report and paste it:
+
+```powershell
+.\scripts\install-windows.bat -Report      # -> sheepfox-report.txt
+```
+
+```bash
+python3 scripts/install.py --report report.txt
 ```
 
 | Symptom | Cause | Fix |

@@ -293,17 +293,31 @@ class TestFloatingSearchUI(unittest.TestCase):
         self.assertIn("toolkit.legacyUserProfileCustomizations.stylesheets", user_js)
         self.assertIs(user_js["toolkit.legacyUserProfileCustomizations.stylesheets"][0], True)
 
-    def test_pill_is_scoped_to_blank_tabs(self) -> None:
+    @property
+    def shell(self) -> str:
+        """The pill's main rule: everything between the two markers below."""
         css = read(self.CHROME)
-        # Positioning hangs off the single attribute Firefox always sets when the
-        # bar is not showing a loaded page. Gating it on :has()/:placeholder-shown
-        # is what made v1 silently do nothing, so the shell rule must be bare.
-        self.assertIn('#urlbar[pageproxystate="invalid"] {', css, msg="pill must have a bare shell rule")
-        shell = css.split('#urlbar[pageproxystate="invalid"] {', 1)[1].split("}", 1)[0]
-        self.assertIn("position: fixed", shell)
-        self.assertNotIn(":has(", shell)
-        self.assertNotIn("placeholder-shown", shell)
-        self.assertIn("translateX(-50%)", shell, msg="pill must be centred horizontally")
+        begin = css.index("1. THE PILL SHELL")
+        return css[begin : css.index("Once the suggestions open", begin)]
+
+    def test_pill_is_scoped_to_the_blank_and_open_states(self) -> None:
+        css = read(self.CHROME)
+        shell = self.shell
+        # Trigger 1: a new/blank tab (nothing loaded to show).
+        self.assertIn('#urlbar[pageproxystate="invalid"]', shell)
+        # Trigger 2: the bar is open over any tab - this is what Zen itself
+        # gates on, and the state Firefox actually lays out itself.
+        self.assertIn("#urlbar[breakout][breakout-extend]", shell)
+        self.assertIn("position: fixed", shell, msg="the pill must leave the toolbar")
+        # Firefox sets top/left/width on the breakout state, so those five
+        # properties need !important or the bar snaps back into the toolbar.
+        for prop in ("top:", "left:", "width:", "margin-left:", "position:"):
+            self.assertIn(f"{prop}", shell)
+        self.assertIn("!important", shell)
+        # Centre with left + a negative inline margin. A transform here fights
+        # the animation Firefox runs when the bar leaves the toolbar.
+        self.assertIn("margin-left: calc(var(--sheepfox-pill-width) / -2)", shell)
+        self.assertNotRegex(shell, r"(?m)^\s*transform:", msg="never transform the pill into place")
         self.assertIn("border-radius: var(--sheepfox-pill-radius)", shell)
         self.assertIn("box-shadow", shell)
         self.assertIn("clamp(", css, msg="pill width must be responsive")
@@ -315,30 +329,31 @@ class TestFloatingSearchUI(unittest.TestCase):
         # Zen/Arc look: centred in the page, not pinned to the toolbar row.
         self.assertIn("--sheepfox-pill-top: 42%", css)
         self.assertIn("--sheepfox-pill-height: 56px", css)
-        # Centred on --sheepfox-pill-top while keeping the TOP edge anchored, so
-        # the suggestion list grows downwards instead of dragging the field up.
         self.assertIn(
             "top: calc(var(--sheepfox-pill-top) - var(--sheepfox-pill-height) / 2)",
             css,
             msg="pill vertical anchor must stay centred but top-anchored",
         )
         # Collapsed state is locked to 56px so the auto-opened dropdown cannot
-        # balloon it; [breakout-extend] may grow it again while typing.
+        # balloon it; the open state may grow again, capped.
         self.assertIn("max-height: var(--sheepfox-pill-height)", css)
-        self.assertIn('#urlbar[pageproxystate="invalid"][breakout-extend]', css)
+        self.assertIn("#urlbar[breakout][breakout-extend],\n#urlbar[pageproxystate=\"invalid\"][breakout-extend] {", css)
         self.assertIn("max-height: 62vh", css)
 
     def test_empty_new_tab_collapses_the_suggestions_panel(self) -> None:
         # Firefox opens the awesomebar results view on the new-tab autofocus;
-        # an empty tab must stay a pill, so that view is collapsed while empty.
+        # an empty tab must stay a pill, so that view is collapsed while the
+        # field is empty.
         css = read(self.CHROME)
-        self.assertIn("#urlbar-results", css)
-        hidden = css.split("#urlbar-results", 1)[1].split("}", 1)[0]
+        hidden = css.split("#urlbar:has(#urlbar-input:placeholder-shown) #urlbar-results", 1)[1].split("}", 1)[0]
         self.assertIn("display: none", hidden)
-        # The opt-out ("dock while typing") ships commented out, so the default
-        # stays the Zen/Arc behaviour.
-        self.assertIn('/*\n#urlbar[pageproxystate="invalid"][breakout-extend] {', css)
+        # The dock-while-typing opt-out ships commented out, so the default stays
+        # the Zen/Arc behaviour.
+        self.assertIn("/*\n#urlbar[breakout][breakout-extend] {", css)
         self.assertIn("position: relative !important;", css)
+        # Zen's dimming backdrop ships commented out too.
+        self.assertIn("#urlbar[breakout][breakout-extend]::after", css)
+        self.assertIn("backdrop-filter: blur(5px)", css)
 
     def test_stylesheet_imports_the_probe(self) -> None:
         css = read(self.CHROME)
@@ -375,7 +390,8 @@ class TestFloatingSearchUI(unittest.TestCase):
         ps1 = (REPO_ROOT / "scripts" / "install-windows.ps1").read_text(encoding="utf-8")
         self.assertIn("$NoUI", ps1)
         self.assertIn("userChrome.css", ps1)
-        self.assertIn('Join-Path $ProfilePath "chrome\\$name"', ps1)
+        self.assertIn('Join-Path $profile "chrome\\$name"', ps1)
+        self.assertIn("foreach ($profile in $Profiles)", ps1, msg="must install into every profile")
 
 
 class TestPolicies(unittest.TestCase):
@@ -924,6 +940,76 @@ class TestInstallers(unittest.TestCase):
         self.assertIn("[switch]$Doctor", text)
         self.assertIn("Report-Check", text)
         self.assertIn("prefs.js", text)
+
+    def test_installer_writes_to_every_profile(self) -> None:
+        """No --profile: every profile on the machine gets the theme.
+
+        Installing into only the detected profile is the classic reason a
+        userChrome theme appears to do nothing (Store build, second profile).
+        """
+        installer = REPO_ROOT / "scripts" / "install.py"
+        if sys.platform == "win32":  # pragma: no cover - profile roots differ
+            self.skipTest("profile root probing is POSIX-specific here")
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            firefox = home / ".mozilla" / "firefox"
+            for name in ("aaa.default-release", "bbb.work"):
+                (firefox / "Profiles" / name).mkdir(parents=True)
+            (firefox / "profiles.ini").write_text(
+                "[Profile1]\nName=default-release\nIsRelative=1\n"
+                "Path=Profiles/aaa.default-release\nDefault=1\n\n"
+                "[Profile0]\nName=work\nIsRelative=1\nPath=Profiles/bbb.work\n",
+                encoding="utf-8",
+            )
+            (firefox / "installs.ini").write_text(
+                "[Install4F96D1932A9F858E]\nDefault=Profiles/bbb.work\nLocked=1\n",
+                encoding="utf-8",
+            )
+            env = dict(os.environ, HOME=str(home))
+            result = subprocess.run(
+                [sys.executable, str(installer)],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+            for name in ("aaa.default-release", "bbb.work"):
+                profile = firefox / "Profiles" / name
+                self.assertTrue((profile / "user.js").is_file(), msg=f"no user.js in {name}")
+                self.assertTrue(
+                    (profile / "chrome" / "userChrome.css").is_file(),
+                    msg=f"floating UI skipped for {name}",
+                )
+            # installs.ini wins: the profile Firefox actually opens goes first.
+            self.assertLess(
+                result.stdout.index("bbb.work"),
+                result.stdout.index("aaa.default-release"),
+                msg="installs.ini order must win: that is the profile Firefox opens",
+            )
+
+    def test_report_writes_a_file(self) -> None:
+        installer = REPO_ROOT / "scripts" / "install.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "profile"
+            profile.mkdir()
+            subprocess.run(
+                [sys.executable, str(installer), "--profile", str(profile)],
+                capture_output=True,
+                check=True,
+            )
+            report = Path(tmp) / "report.txt"
+            result = subprocess.run(
+                [sys.executable, str(installer), "--profile", str(profile), "--report", str(report)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertTrue(report.is_file(), msg=result.stdout + result.stderr)
+            text = report.read_text(encoding="utf-8")
+            self.assertIn("doctor", text)
+            self.assertIn("profiles found", text)
+            self.assertIn("exit_code=", text)
 
     def test_probe_round_trip(self) -> None:
         """--probe must produce a file the stylesheet imports, and --unprobe clears it."""

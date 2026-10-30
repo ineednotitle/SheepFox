@@ -185,6 +185,26 @@ def detect_default_profile() -> Path | None:
     return None
 
 
+def all_profiles() -> list[Path]:
+    """Every Firefox profile on this machine, across every install type.
+
+    Installing into all of them removes profile detection as a failure mode:
+    the CSS lands wherever Firefox actually happens to run.
+    """
+    found: list[Path] = []
+    for root in candidate_profile_roots():
+        for candidate in read_install_defaults(root):
+            if candidate not in found:
+                found.append(candidate)
+    default = detect_default_profile()
+    if default and default not in found:
+        found.insert(0, default)
+    for candidate in iter_profile_dirs():
+        if candidate not in found:
+            found.append(candidate)
+    return found
+
+
 def detect_system_firefox_dir() -> Path | None:
     for path in candidate_system_firefox_dirs():
         if path.is_dir():
@@ -351,6 +371,17 @@ def backup_and_write(dest: Path, content: str, dry_run: bool) -> None:
     print(f"  [WRITE]  Installed {dest}")
 
 
+def _uninstall_profile(profile: Path, dry_run: bool) -> None:
+    for target in [profile / "user.js"] + [profile / "chrome" / name for name in (*UI_FILES, PROBE_FILE)]:
+        if not target.exists():
+            continue
+        if dry_run:
+            print(f"  [DRY-RUN] Would remove {target}")
+        else:
+            target.unlink()
+            print(f"  [REMOVE] Removed {target}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Install (SheepFox) Firefox speed & privacy suite.")
     parser.add_argument("--profile", type=Path, help="Explicit path to target Firefox profile directory.")
@@ -368,6 +399,13 @@ def main() -> int:
         "--doctor",
         action="store_true",
         help="Diagnose why the floating-search UI (or the install) is not taking effect.",
+    )
+    parser.add_argument(
+        "--report",
+        type=Path,
+        nargs="?",
+        const=Path("sheepfox-report.txt"),
+        help="Write a full diagnostic report to a file (default: ./sheepfox-report.txt).",
     )
     parser.add_argument(
         "--probe",
@@ -388,6 +426,12 @@ def main() -> int:
 
     profile_dir = args.profile.resolve() if args.profile else detect_default_profile()
     firefox_dir = args.firefox_dir.resolve() if args.firefox_dir else detect_system_firefox_dir()
+    # With no explicit --profile, install into EVERY profile that exists. Profile
+    # detection is the number-one reason a userChrome theme silently does
+    # nothing (Store builds, portable builds, a second profile).
+    targets = [profile_dir] if args.profile else all_profiles()
+    if targets and profile_dir is None:
+        profile_dir = targets[0]
 
     if args.profile and not profile_dir.is_dir():
         print(f"[ERROR] Profile directory does not exist: {profile_dir}", file=sys.stderr)
@@ -397,28 +441,61 @@ def main() -> int:
         return 1
 
     print("=== (SheepFox) Firefox Installer ===")
-    print(f"Detected Profile : {profile_dir if profile_dir else 'Not found (pass --profile <dir>)'}")
+    if len(targets) > 1:
+        print(f"Detected Profiles: {len(targets)} (installing into all of them)")
+        for target in targets:
+            print(f"                 - {target}")
+    else:
+        print(f"Detected Profile : {profile_dir if profile_dir else 'Not found (pass --profile <dir>)'}")
     print(f"Detected System  : {firefox_dir if firefox_dir else 'Not found (pass --firefox-dir <dir>)'}")
+
+    if args.report is not None:
+        import contextlib
+        import io as _io
+
+        buffer = _io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            print("=== (SheepFox) Firefox report ===")
+            print(f"platform     : {platform.platform()}")
+            print(f"repo         : {REPO_ROOT}")
+            print(f"firefox dir  : {firefox_dir}")
+            print(f"firefox ver  : {read_firefox_version(firefox_dir)}")
+            print("profiles found:")
+            for candidate in all_profiles():
+                print(f"  - {candidate}")
+            print()
+            code = doctor(profile_dir, firefox_dir)
+        text = buffer.getvalue()
+        destination = args.report if args.report.is_absolute() else Path.cwd() / args.report
+        destination.write_text(text + f"\nexit_code={code}\n", encoding="utf-8")
+        print(text)
+        print(f"[REPORT] Written to {destination}")
+        print("         Paste that file (or its contents) into the issue/chat.")
+        return code
 
     if args.doctor:
         return doctor(profile_dir, firefox_dir)
 
     if args.probe or args.unprobe:
-        if not profile_dir or not profile_dir.is_dir():
+        targets = [t for t in targets if t.is_dir()]
+        if not targets:
             print("[ERROR] No profile to write the probe into. Pass --profile <dir>.", file=sys.stderr)
             return 1
-        probe_path = profile_dir / "chrome" / PROBE_FILE
-        if args.unprobe:
-            if probe_path.exists():
-                if args.dry_run:
-                    print(f"  [DRY-RUN] Would remove {probe_path}")
+        for target in targets:
+            probe_path = target / "chrome" / PROBE_FILE
+            if args.unprobe:
+                if probe_path.exists():
+                    if args.dry_run:
+                        print(f"  [DRY-RUN] Would remove {probe_path}")
+                    else:
+                        probe_path.unlink()
+                        print(f"  [REMOVE] Removed {probe_path}")
                 else:
-                    probe_path.unlink()
-                    print(f"  [REMOVE] Removed {probe_path}")
-            else:
-                print("  [INFO]   No probe file present.")
+                    print(f"  [INFO]   No probe file present in {target}")
+                continue
+            backup_and_write(probe_path, PROBE_CSS, dry_run=args.dry_run)
+        if args.unprobe:
             return 0
-        backup_and_write(probe_path, PROBE_CSS, dry_run=args.dry_run)
         if not args.dry_run:
             print("\n  Now QUIT Firefox completely (Task Manager -> no firefox.exe), start it and")
             print("  open a new tab: a RED toolbar + green pill outline means the CSS is loading.")
@@ -426,21 +503,8 @@ def main() -> int:
         return 0
 
     if args.uninstall:
-        if profile_dir and (profile_dir / "user.js").exists():
-            if args.dry_run:
-                print(f"  [DRY-RUN] Would remove {profile_dir / 'user.js'}")
-            else:
-                (profile_dir / "user.js").unlink()
-                print(f"  [REMOVE] Removed {profile_dir / 'user.js'}")
-        if profile_dir:
-            for name in (*UI_FILES, PROBE_FILE):
-                target = profile_dir / "chrome" / name
-                if target.exists():
-                    if args.dry_run:
-                        print(f"  [DRY-RUN] Would remove {target}")
-                    else:
-                        target.unlink()
-                        print(f"  [REMOVE] Removed {target}")
+        for target_profile in [t for t in targets if t.is_dir()]:
+            _uninstall_profile(target_profile, args.dry_run)
         if args.system and firefox_dir:
             for rel in ["sheepfox.cfg", "defaults/pref/local-settings.js", "distribution/policies.json"]:
                 target = firefox_dir / rel
@@ -463,21 +527,21 @@ def main() -> int:
         print("[ERROR] Could not auto-detect a Firefox profile. Launch Firefox once or pass --profile <path>.", file=sys.stderr)
         return 1
 
-    if profile_dir:
-        payload = compose_user_js(strict=args.strict, low_memory=args.low_memory)
-        backup_and_write(profile_dir / "user.js", payload, dry_run=args.dry_run)
+    payload = compose_user_js(strict=args.strict, low_memory=args.low_memory)
+    for target in [t for t in targets if t.is_dir()]:
+        if len(targets) > 1:
+            print(f"\n  -> {target}")
+        backup_and_write(target / "user.js", payload, dry_run=args.dry_run)
 
         if args.no_ui:
             print("  [SKIP]   UI theme skipped (--no-ui)")
-        else:
-            for name in UI_FILES:
-                src = CHROME_SRC_DIR / name
-                if not src.is_file():
-                    print(f"  [WARN]   Missing UI asset: {src}")
-                    continue
-                backup_and_write(
-                    profile_dir / "chrome" / name, src.read_text(encoding="utf-8"), args.dry_run
-                )
+            continue
+        for name in UI_FILES:
+            src = CHROME_SRC_DIR / name
+            if not src.is_file():
+                print(f"  [WARN]   Missing UI asset: {src}")
+                continue
+            backup_and_write(target / "chrome" / name, src.read_text(encoding="utf-8"), args.dry_run)
 
     if args.system:
         if not firefox_dir:

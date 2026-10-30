@@ -50,6 +50,10 @@
 .PARAMETER Unprobe
   Delete the file written by -Probe.
 
+.PARAMETER Report
+  Run the doctor and write the whole transcript to sheepfox-report.txt in the
+  current folder, so it can be pasted into a bug report.
+
 .EXAMPLE
   .\scripts\install-windows.bat
 
@@ -71,6 +75,7 @@ param(
     [switch]$LowMemory,
     [switch]$Probe,
     [switch]$Unprobe,
+    [switch]$Report,
     [string]$ProfilePath = "",
     [string]$FirefoxDir = "",
     # Catches stray tokens (for example a '::' comment copied from cmd.exe docs)
@@ -232,6 +237,46 @@ function Resolve-FirefoxDir {
     return $null
 }
 
+function Get-SheepFoxProfiles {
+    # Every profile this machine has, across standard, Microsoft Store (MSIX)
+    # and portable installs. Installing into all of them removes profile
+    # detection as a failure mode.
+    $results = @()
+    $roots = @()
+    if ($env:APPDATA) { $roots += (Join-Path $env:APPDATA "Mozilla\Firefox") }
+    if ($env:LOCALAPPDATA) {
+        $packages = Join-Path $env:LOCALAPPDATA "Packages"
+        if (Test-Path $packages) {
+            foreach ($dir in (Get-ChildItem -Path $packages -Directory -Filter "Mozilla.Firefox_*" -ErrorAction SilentlyContinue)) {
+                $roots += (Join-Path $dir.FullName "LocalCache\Roaming\Mozilla\Firefox")
+            }
+        }
+    }
+    foreach ($root in $roots) {
+        # installs.ini first: it records which profile each install opens.
+        foreach ($name in @("installs.ini", "profiles.ini")) {
+            $ini = Join-Path $root $name
+            if (-not (Test-Path $ini)) { continue }
+            $base = Split-Path -Parent $ini
+            foreach ($section in (Read-ProfileIni -IniPath $ini)) {
+                $relative = $null
+                if ($section.Values.ContainsKey("Default")) { $relative = $section.Values["Default"] }
+                elseif ($section.Values.ContainsKey("Path")) { $relative = $section.Values["Path"] }
+                if (-not $relative) { continue }
+                $candidate = if ($section.Values.ContainsKey("IsRelative") -and $section.Values["IsRelative"] -eq "0") {
+                    $relative
+                } else {
+                    Join-Path $base $relative
+                }
+                if (-not (Test-Path $candidate)) { continue }
+                $full = (Resolve-Path $candidate).Path
+                if ($results -notcontains $full) { $results += $full }
+            }
+        }
+    }
+    return $results
+}
+
 # --------------------------------------------------------------------------
 # Elevation
 # --------------------------------------------------------------------------
@@ -285,30 +330,12 @@ if (-not (Test-Path $UserJsSrc)) {
 
 Write-SheepFox "=== (SheepFox) Firefox Windows Installer ===" "Cyan"
 
-if (-not $ProfilePath) {
-    $profileRoots = @()
-    if ($env:APPDATA) { $profileRoots += (Join-Path $env:APPDATA "Mozilla\Firefox") }
-    # Microsoft Store (MSIX) builds redirect AppData, so their profile lives in
-    # a package-specific folder. This is the usual reason a theme "does nothing".
-    if ($env:LOCALAPPDATA) {
-        $packages = Join-Path $env:LOCALAPPDATA "Packages"
-        if (Test-Path $packages) {
-            foreach ($dir in (Get-ChildItem -Path $packages -Directory -Filter "Mozilla.Firefox_*" -ErrorAction SilentlyContinue)) {
-                $profileRoots += (Join-Path $dir.FullName "LocalCache\Roaming\Mozilla\Firefox")
-            }
-        }
-    }
-    # installs.ini records which profile this install actually opens.
-    foreach ($root in $profileRoots) {
-        if ($ProfilePath) { break }
-        $installIni = Join-Path $root "installs.ini"
-        if (Test-Path $installIni) { $ProfilePath = Resolve-ProfileFromIni -IniPath $installIni }
-    }
-    foreach ($root in $profileRoots) {
-        if ($ProfilePath) { break }
-        $profilesIni = Join-Path $root "profiles.ini"
-        if (Test-Path $profilesIni) { $ProfilePath = Resolve-ProfileFromIni -IniPath $profilesIni }
-    }
+$Profiles = @()
+if ($ProfilePath) {
+    $Profiles = @($ProfilePath)
+} else {
+    $Profiles = @(Get-SheepFoxProfiles)
+    if ($Profiles.Count -gt 0) { $ProfilePath = $Profiles[0] }
 }
 if (-not $FirefoxDir) {
     $FirefoxDir = Resolve-FirefoxDir -Explicit ""
@@ -367,8 +394,15 @@ if ($Probe -or $Unprobe) {
 # --------------------------------------------------------------------------
 # Doctor
 # --------------------------------------------------------------------------
+if ($Report) { $Doctor = $true }
+
 if ($Doctor) {
+    if ($Report) {
+        $reportPath = Join-Path (Get-Location) "sheepfox-report.txt"
+        try { Start-Transcript -Path $reportPath -Force | Out-Null } catch { Write-SheepFox "[warn] could not start transcript: $_" "Yellow" }
+    }
     Write-SheepFox "=== (SheepFox) Firefox doctor ===" "Cyan"
+    Write-SheepFox ("  profiles : " + $(if ($Profiles.Count -gt 0) { $Profiles -join "; " } else { "none found" }))
     $problems = 0
 
     function Report-Check {
@@ -391,6 +425,7 @@ if ($Doctor) {
 
     if (-not $ProfilePath -or -not (Test-Path $ProfilePath)) {
         Write-SheepFox "  [FAIL] no Firefox profile found. Launch Firefox once, or pass -ProfilePath." "Red"
+        if ($Report) { Stop-Transcript | Out-Null; Write-SheepFox "  report: $reportPath" "Cyan" }
         exit 1
     }
 
@@ -471,6 +506,7 @@ if ($Doctor) {
     if ($problems -gt 0) {
         Write-SheepFox "  $problems problem(s) found. Fix the FAIL lines above, then restart Firefox." "Yellow"
         Write-SheepFox "  Full reinstall:  .\scripts\install-windows.bat -System" "Yellow"
+        if ($Report) { Stop-Transcript | Out-Null; Write-SheepFox "  report: $reportPath" "Cyan" }
         exit 1
     }
 
@@ -490,9 +526,9 @@ if ($Doctor) {
 # --------------------------------------------------------------------------
 if ($Uninstall) {
     $targets = @()
-    if ($ProfilePath) {
-        $targets += (Join-Path $ProfilePath "user.js")
-        foreach ($name in ($UiFiles + $ProbeFile)) { $targets += (Join-Path $ProfilePath "chrome\$name") }
+    foreach ($profile in $Profiles) {
+        $targets += (Join-Path $profile "user.js")
+        foreach ($name in ($UiFiles + $ProbeFile)) { $targets += (Join-Path $profile "chrome\$name") }
     }
     if ($System -and $FirefoxDir) {
         $targets += @(
@@ -519,9 +555,9 @@ if ($Uninstall) {
 }
 
 # --------------------------------------------------------------------------
-# Install: profile payload
+# Install: profile payload (user.js + floating search UI), every profile
 # --------------------------------------------------------------------------
-if ($ProfilePath -and (Test-Path $ProfilePath)) {
+if ($Profiles.Count -gt 0) {
     $payload = [System.IO.File]::ReadAllText($UserJsSrc)
     if ($Strict) {
         $payload = $payload + "`r`n`r`n" + [System.IO.File]::ReadAllText($StrictSrc)
@@ -536,32 +572,30 @@ if ($ProfilePath -and (Test-Path $ProfilePath)) {
         Write-SheepFox "  [custom] appending config\overrides\user-overrides.js" "DarkYellow"
     }
 
-    $targetUserJs = Join-Path $ProfilePath "user.js"
-    if ($DryRun) {
-        Write-SheepFox "  [dry-run] would write $targetUserJs"
-    } else {
-        Backup-ExistingFile -Path $targetUserJs
-        Write-Utf8NoBom -Path $targetUserJs -Content $payload
-        Write-SheepFox "  [ok] installed user.js -> $targetUserJs" "Green"
-    }
-} elseif (-not $System) {
-    Write-SheepFox "[warn] No Firefox profile found. Launch Firefox once, or pass -ProfilePath." "Yellow"
-}
+    foreach ($profile in $Profiles) {
+        if (-not (Test-Path $profile)) { continue }
+        if ($Profiles.Count -gt 1) { Write-SheepFox "`n  -> $profile" "Cyan" }
 
-# --------------------------------------------------------------------------
-# Install: floating new-tab search (userChrome.css / userContent.css)
-# --------------------------------------------------------------------------
-if ($ProfilePath -and (Test-Path $ProfilePath)) {
-    if ($NoUI) {
-        Write-SheepFox "  [skip] UI theme skipped (-NoUI)" "DarkYellow"
-    } else {
+        $targetUserJs = Join-Path $profile "user.js"
+        if ($DryRun) {
+            Write-SheepFox "  [dry-run] would write $targetUserJs"
+        } else {
+            Backup-ExistingFile -Path $targetUserJs
+            Write-Utf8NoBom -Path $targetUserJs -Content $payload
+            Write-SheepFox "  [ok] installed user.js -> $targetUserJs" "Green"
+        }
+
+        if ($NoUI) {
+            Write-SheepFox "  [skip] UI theme skipped (-NoUI)" "DarkYellow"
+            continue
+        }
         foreach ($name in $UiFiles) {
             $source = Join-Path $ChromeSrcDir $name
             if (-not (Test-Path $source)) {
                 Write-SheepFox "  [warn] missing UI asset: $source" "Yellow"
                 continue
             }
-            $target = Join-Path $ProfilePath "chrome\$name"
+            $target = Join-Path $profile "chrome\$name"
             if ($DryRun) {
                 Write-SheepFox "  [dry-run] would write $target"
                 continue
@@ -571,6 +605,8 @@ if ($ProfilePath -and (Test-Path $ProfilePath)) {
             Write-SheepFox "  [ok] installed floating search UI -> $target" "Green"
         }
     }
+} elseif (-not $System) {
+    Write-SheepFox "[warn] No Firefox profile found. Launch Firefox once, or pass -ProfilePath." "Yellow"
 }
 
 # --------------------------------------------------------------------------
