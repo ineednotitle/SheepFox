@@ -239,6 +239,23 @@ class TestPreferenceInvariants(unittest.TestCase):
 
         self.assertIs(self.value("extensions.ml.enabled"), False)
 
+    def test_resource_footprint_prefs(self) -> None:
+        # Deliberately below Firefox defaults: fewer processes, smaller media
+        # cache, lazier session writes.
+        self.assertLess(self.value("dom.ipc.processCount"), 8)
+        self.assertEqual(self.value("dom.ipc.processCount"), 6)
+        self.assertLess(self.value("media.cache_size"), 512000)
+        self.assertGreaterEqual(self.value("browser.sessionstore.interval"), 60000)
+        self.assertIs(self.value("browser.tabs.unloadOnLowMemory"), True)
+
+    def test_low_memory_override_is_opt_in(self) -> None:
+        override = read(REPO_ROOT / "config" / "overrides" / "low-memory.override.js")
+        self.assertIn('user_pref("fission.autostart", false);', override)
+        self.assertIn("TRADE-OFF", override)
+        # Never applied by default.
+        self.assertNotIn("fission.autostart", read(USER_JS))
+        self.assertNotIn("fission.autostart", read(CFG))
+
     def test_fullscreen_and_scroll_physics(self) -> None:
         self.assertEqual(self.value("full-screen-api.transition-duration.enter"), "0 0")
         self.assertEqual(self.value("full-screen-api.transition-duration.leave"), "0 0")
@@ -284,23 +301,31 @@ class TestFloatingSearchUI(unittest.TestCase):
         # it on a new tab, which would otherwise hide the pill.
         self.assertIn(":has(#urlbar-input:placeholder-shown)", css)
         self.assertIn("position: fixed", css)
-        self.assertIn("translateX(-50%)", css, msg="pill must be horizontally centred")
+        self.assertIn("translate(-50%, -50%)", css, msg="pill must be centred in both axes")
         self.assertIn("border-radius: var(--sheepfox-pill-radius)", css)
         self.assertIn("box-shadow", css)
         self.assertIn("clamp(", css, msg="pill width must be responsive")
         # Never hide or disable the address bar itself.
         self.assertNotRegex(css, r"#urlbar\s*\{[^}]*display:\s*none")
 
-    def test_expanded_results_state_stays_centred(self) -> None:
+    def test_pill_is_vertically_centred_and_compact(self) -> None:
         css = read(self.CHROME)
-        self.assertIn('[breakout-extend]', css, msg="results-open state must be handled")
-        # In the expanded state the height must stay auto so Gecko can grow the
-        # bar for the results panel.
-        expanded = css.split('[breakout-extend] {', 1)
-        self.assertEqual(len(expanded), 2, msg="missing expanded-state rule block")
-        block = expanded[1].split("}", 1)[0]
-        self.assertIn("min-height", block)
-        self.assertNotIn("height:", block.replace("min-height:", ""))
+        # Zen/Arc look: centred in the page, not pinned to the toolbar row.
+        self.assertIn("translate(-50%, -50%)", css)
+        self.assertIn("--sheepfox-pill-top: 42%", css)
+        self.assertIn("--sheepfox-pill-height: 56px", css)
+        # Height is locked so the auto-opened dropdown cannot balloon the pill.
+        self.assertIn("max-height: var(--sheepfox-pill-height)", css)
+
+    def test_empty_new_tab_collapses_the_suggestions_panel(self) -> None:
+        # Firefox opens the awesomebar results view on the new-tab autofocus;
+        # an empty tab must stay a pill, so that view is collapsed while empty.
+        css = read(self.CHROME)
+        self.assertIn("#urlbar-results", css)
+        hidden = css.split("#urlbar-results", 1)[1].split("}", 1)[0]
+        self.assertIn("display: none", hidden)
+        # "Arc mode" (keep the panel while floating) ships commented out.
+        self.assertIn("/*\n#urlbar[pageproxystate=\"invalid\"]:has(#urlbar-input:placeholder-shown) #urlbar-results", css)
 
     def test_dark_mode_and_reduced_motion(self) -> None:
         css = read(self.CHROME)
@@ -677,6 +702,26 @@ class TestInstallers(unittest.TestCase):
             self.assertFalse((profile / "chrome" / "userContent.css").exists())
             self.assertFalse((firefox / "sheepfox.cfg").exists())
             self.assertEqual(list(profile.iterdir()), [])
+
+    def test_low_memory_flag_appends_override(self) -> None:
+        installer = REPO_ROOT / "scripts" / "install.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "profile"
+            profile.mkdir()
+            result = subprocess.run(
+                [sys.executable, str(installer), "--profile", str(profile), "--low-memory"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
+            user_js = (profile / "user.js").read_text(encoding="utf-8")
+            self.assertIn('user_pref("fission.autostart", false);', user_js)
+            self.assertIn('user_pref("dom.ipc.processCount", 2);', user_js)
+
+        ps1 = (REPO_ROOT / "scripts" / "install-windows.ps1").read_text(encoding="utf-8")
+        self.assertIn("[switch]$LowMemory", ps1)
+        self.assertIn("low-memory.override.js", ps1)
 
     def test_no_ui_flag_skips_chrome_css(self) -> None:
         installer = REPO_ROOT / "scripts" / "install.py"

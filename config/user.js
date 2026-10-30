@@ -6,7 +6,7 @@
 // AUTO-GENERATED FILE — DO NOT EDIT BY HAND.
 // Edit config/modules/*.js and run:  make build-configs
 // Modules: 01-speedfox.js, 02-shieldfox.js, 03-cleanfox.js, 04-smoothfox.js
-// Preferences: 131 (27 locked in the system AutoConfig)
+// Preferences: 134 (27 locked in the system AutoConfig)
 //
 // `// @lock` annotations are inert here: they only promote a preference to
 // lockPref() inside config/autoconfig/sheepfox.cfg.
@@ -81,6 +81,18 @@ user_pref("network.ssl_tokens_cache_capacity", 10240);
 // --- Stability & Memory Pressure Safeguards ---
 // Reclaim memory from idle tabs instead of swapping or crashing the browser
 user_pref("browser.tabs.unloadOnLowMemory", true);
+
+// --- Resource footprint: less RAM and CPU for the same pages ---
+// Fewer content processes (Firefox default: 8). Each process carries a fixed
+// baseline RSS, so 6 trims idle memory while keeping site isolation intact.
+// Raise back to 8 if you routinely keep 30+ heavy tabs open.
+user_pref("dom.ipc.processCount", 6);
+// Cap the media cache (Firefox default: 500 MB). Long video sessions no longer
+// pin hundreds of megabytes of RAM for already-watched segments.
+user_pref("media.cache_size", 131072);
+// Session restore used to hit the disk every 15 s. 60 s cuts background I/O and
+// wakeups without changing crash-recovery behaviour.
+user_pref("browser.sessionstore.interval", 60000);
 
 // ---------------------------------------------------------------------------
 // Source module: config/modules/02-shieldfox.js

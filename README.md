@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <code>MPL-2.0</code> · <code>Firefox 159.0</code> pin · <code>131 prefs</code> · <code>4 verified upstream patches</code>
+  <code>MPL-2.0</code> · <code>Firefox 159.0</code> pin · <code>134 prefs</code> · <code>4 verified upstream patches</code>
 </p>
 
 ---
@@ -77,7 +77,8 @@ SheepFox/
 │   │   ├── userChrome.css           #   centred pill on blank tabs (toolbar untouched)
 │   │   └── userContent.css          #   clears the New Tab wordmark, lifts the shortcuts
 │   ├── distribution/policies.json   # SheepShields: telemetry off + uBlock Origin on
-│   └── overrides/                   # user-overrides.example.js, strict-paranoia.override.js
+│   └── overrides/                   # user-overrides.example.js, strict-paranoia.override.js,
+│                                    #   low-memory.override.js
 │
 ├── branding/sheepfox/               # MODE 2 — SheepFox brand assets
 │   ├── configure.sh                 # MOZ_APP_NAME=sheepfox, telemetry env cleared
@@ -173,22 +174,28 @@ python scripts\install.py --system --uninstall
 
 ### UI: floating new-tab search (Zen / Arc style)
 
-Open a new tab (`Ctrl+T`) and the address + search bar detaches from the toolbar and floats,
-centred, as a rounded glass pill; the New Tab wordmark is cleared and your shortcuts sit below
-it, like Arc's command bar or Zen's empty canvas. The moment you focus it — or load a page — it
-docks back into the stock toolbar, so the results panel, keyboard handling and every other page
-behave exactly like normal Firefox.
+Open a new tab (`Ctrl+T`) and the address + search bar detaches from the toolbar and floats **in the
+middle of the page** as a compact rounded pill (56 px, `top: 42%`), with the New Tab wordmark
+removed and the shortcut grid sitting below it — Zen's empty canvas with Arc's command bar.
+
+Firefox focuses the address bar on a new tab and auto-opens its suggestions dropdown; that dropdown
+is collapsed while the field is empty, so a blank tab really is a pill and not a form. Start
+typing, or load a page, and the bar docks straight back into the stock toolbar with the normal
+autocomplete. Want the suggestions to stay under the floating pill while you type (Arc mode)?
+Uncomment the marked block at the end of `config/chrome/userChrome.css`.
 
 It ships as **profile CSS**, not a patch, so it is instantly reversible:
 
 ```bash
 ./scripts/install-unix.sh            # installs config/chrome/*.css into <profile>/chrome/
 ./scripts/install-unix.sh --no-ui    # everything except the UI theme
+./scripts/install-unix.sh --low-memory   # minimal-RAM override (see below)
 ```
 
 ```powershell
 .\scripts\install-windows.bat
 .\scripts\install-windows.bat -NoUI
+.\scripts\install-windows.bat -LowMemory
 ```
 
 Why it cannot break browsing: the pill requires **both** `#urlbar[pageproxystate="invalid"]`
@@ -204,7 +211,8 @@ Tuning or removing it:
 
 | Want | Do |
 | :--- | :--- |
-| Move the pill / resize it | edit `--sheepfox-pill-top`, `--sheepfox-pill-width` in your profile's `chrome/userChrome.css` |
+| Move the pill / resize it | edit `--sheepfox-pill-top` (default `42%`; use `50%` for dead-centre), `--sheepfox-pill-width`, `--sheepfox-pill-height` in your profile's `chrome/userChrome.css` |
+| Keep it floating while typing (Arc mode) | uncomment the "Arc mode" block at the bottom of `config/chrome/userChrome.css`, then reinstall |
 | Shrink it back to a normal bar | delete `<profile>/chrome/userChrome.css` |
 | Keep the pill, restore the New Tab logo | delete `<profile>/chrome/userContent.css` |
 | Uninstall everything | `python3 scripts/install.py --uninstall` (removes both files) |
@@ -298,8 +306,10 @@ What the suite enforces:
    `patches/series` lists exactly the `.patch` files present.
 9. Windows `.bat`/`.ps1` are BOM-free, CRLF, contain the `ExecutionPolicy Bypass` invocation,
    `Unblock-File`, UAC re-launch and `UTF8Encoding($false)` writes.
-10. A mock profile exercises install → backup → `--system` → `--strict` → `--uninstall`, and
-    `--dry-run` is proven to write nothing.
+10. A mock profile exercises install → backup → `--system` → `--strict` → `--low-memory` →
+    `--uninstall`, and `--dry-run` is proven to write nothing.
+11. Resource-footprint prefs stay below Firefox's defaults, and the low-memory override never
+    leaks into the default profile.
 
 ---
 
@@ -334,6 +344,38 @@ Prove *where* your profile is:
 Get-ChildItem "$env:APPDATA\Mozilla\Firefox\Profiles" -Directory |
   ForEach-Object { "$($_.Name)  chrome=$(Test-Path (Join-Path $_.FullName 'chrome\userChrome.css'))  user.js=$(Test-Path (Join-Path $_.FullName 'user.js'))" }
 ```
+
+## RAM & CPU footprint
+
+Firefox defaults are tuned for marketing benchmarks, not for idle cost. On top of stripping
+telemetry/ML/Pocket workers, SheepFox ships these measured knobs in `config/modules/01-speedfox.js`:
+
+| Pref | Firefox | SheepFox | Effect |
+| :--- | :--- | :--- | :--- |
+| `dom.ipc.processCount` | 8 | **6** | each content process carries a fixed baseline RSS; fewer processes = less idle RAM, site isolation kept |
+| `media.cache_size` | 512000 KiB (~500 MB) | **131072 KiB (128 MB)** | long video sessions stop pinning hundreds of MB of watched segments |
+| `browser.sessionstore.interval` | 15 s | **60 s** | fewer background disk writes and wakeups; crash recovery unchanged |
+| `browser.tabs.unloadOnLowMemory` | true | **true** | idle tabs are discarded instead of swapping/crashing |
+| `browser.ml.enable` | true | **false** | no inference worker process at all |
+| `browser.cache.disk.enable` | true | **false** | no disk cache; hot assets come from the 256 MB RAM cache |
+
+### Need even less? `--low-memory`
+
+For 4 GB machines, VMs, or 50-tab sessions:
+
+```bash
+python3 scripts/install.py --low-memory
+```
+
+```powershell
+.\scripts\install-windows.bat -LowMemory
+```
+
+This appends `config/overrides/low-memory.override.js`: one content process
+(`dom.ipc.processCount = 2`), **`fission.autostart = false`**, 64 MB memory cache, 32 MB media
+cache, single bfcache entry, and aggressive idle-tab unloading. That is where the big saving comes
+from — and it is exactly why it is opt-in: disabling Fission means a compromised renderer can share
+a process with other sites. Use it for memory pressure, not by default.
 
 ## How `// @lock` works
 

@@ -21,6 +21,10 @@
 .PARAMETER Uninstall
   Remove the files SheepFox installed. Timestamped backups are left untouched.
 
+.PARAMETER LowMemory
+  Append config\overrides\low-memory.override.js (fewer content processes,
+  smaller caches). Disables Fission site isolation - see the file header.
+
 .PARAMETER Doctor
   Diagnose an existing install: report the profile in use, whether user.js and
   chrome\userChrome.css are in the right place, and whether the stylesheet pref
@@ -57,6 +61,7 @@ param(
     [switch]$DryRun,
     [switch]$NoUI,
     [switch]$Doctor,
+    [switch]$LowMemory,
     [string]$ProfilePath = "",
     [string]$FirefoxDir = "",
     # Catches stray tokens (for example a '::' comment copied from cmd.exe docs)
@@ -233,6 +238,7 @@ if ($System -and -not (Test-IsAdmin) -and -not $DryRun -and -not $Doctor) {
     )
     if ($Strict) { $argumentList += "-Strict" }
     if ($NoUI) { $argumentList += "-NoUI" }
+    if ($LowMemory) { $argumentList += "-LowMemory" }
     if ($Uninstall) { $argumentList += "-Uninstall" }
     if ($ProfilePath) { $argumentList += @("-ProfilePath", "`"$ProfilePath`"") }
     if ($FirefoxDir) { $argumentList += @("-FirefoxDir", "`"$FirefoxDir`"") }
@@ -252,6 +258,7 @@ if ($System -and -not (Test-IsAdmin) -and -not $DryRun -and -not $Doctor) {
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $UserJsSrc = Join-Path $RepoRoot "config\user.js"
 $StrictSrc = Join-Path $RepoRoot "config\overrides\strict-paranoia.override.js"
+$LowMemorySrc = Join-Path $RepoRoot "config\overrides\low-memory.override.js"
 $UserOverridesSrc = Join-Path $RepoRoot "config\overrides\user-overrides.js"
 $PoliciesSrc = Join-Path $RepoRoot "config\distribution\policies.json"
 $AutoCfgSrc = Join-Path $RepoRoot "config\autoconfig\sheepfox.cfg"
@@ -402,6 +409,10 @@ if ($ProfilePath -and (Test-Path $ProfilePath)) {
     if ($Strict) {
         $payload = $payload + "`r`n`r`n" + [System.IO.File]::ReadAllText($StrictSrc)
         Write-SheepFox "  [strict] appending strict RFP overrides" "DarkYellow"
+    }
+    if ($LowMemory) {
+        $payload = $payload + "`r`n`r`n" + [System.IO.File]::ReadAllText($LowMemorySrc)
+        Write-SheepFox "  [memory] appending low-memory overrides (Fission off)" "DarkYellow"
     }
     if (Test-Path $UserOverridesSrc) {
         $payload = $payload + "`r`n`r`n// --- Personal user overrides ---`r`n" + [System.IO.File]::ReadAllText($UserOverridesSrc)

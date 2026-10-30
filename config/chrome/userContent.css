@@ -1,7 +1,7 @@
 /* ============================================================================
    (SheepFox) Firefox — userContent.css
-   Pairs with config/chrome/userChrome.css: the floating pill sits at 24vh on a
-   blank tab, so the New Tab page gets cleared out and pushed down to make room
+   Pairs with config/chrome/userChrome.css: the floating pill sits at ~42% of the
+   viewport, so the New Tab page is cleared out and its shortcuts move below it
    — the Zen / Arc "search on an empty canvas" layout.
 
    Installed to: <profile>/chrome/userContent.css
@@ -17,9 +17,9 @@
     display: none !important;
   }
 
-  /* 2. Push the shortcut tiles below the floating pill (pill ends ~24vh+56px). */
+  /* 2. Push the shortcut grid below the pill (pill centre ~42% + 28px). */
   .outer-wrapper {
-    padding-top: 34vh !important;
+    padding-top: 56vh !important;
   }
 
   /* 3. Tighter, rounder shortcut grid — closer to an Arc "cards" row. */

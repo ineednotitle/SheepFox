@@ -25,6 +25,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 USER_JS_SRC = REPO_ROOT / "config" / "user.js"
 STRICT_OVERRIDE_SRC = REPO_ROOT / "config" / "overrides" / "strict-paranoia.override.js"
+LOW_MEMORY_OVERRIDE_SRC = REPO_ROOT / "config" / "overrides" / "low-memory.override.js"
 CUSTOM_OVERRIDE_SRC = REPO_ROOT / "config" / "overrides" / "user-overrides.js"
 POLICIES_SRC = REPO_ROOT / "config" / "distribution" / "policies.json"
 AUTOCONFIG_CFG_SRC = REPO_ROOT / "config" / "autoconfig" / "sheepfox.cfg"
@@ -212,10 +213,12 @@ def doctor(profile_dir: Path | None, firefox_dir: Path | None) -> int:
     return 0
 
 
-def compose_user_js(strict: bool) -> str:
+def compose_user_js(strict: bool, low_memory: bool = False) -> str:
     content = USER_JS_SRC.read_text(encoding="utf-8")
     if strict:
         content += "\n\n" + STRICT_OVERRIDE_SRC.read_text(encoding="utf-8")
+    if low_memory:
+        content += "\n\n" + LOW_MEMORY_OVERRIDE_SRC.read_text(encoding="utf-8")
     if CUSTOM_OVERRIDE_SRC.exists():
         content += "\n\n// --- Personal User Overrides ---\n"
         content += CUSTOM_OVERRIDE_SRC.read_text(encoding="utf-8")
@@ -242,6 +245,11 @@ def main() -> int:
     parser.add_argument("--firefox-dir", type=Path, help="Explicit path to Firefox binary installation folder.")
     parser.add_argument("--system", action="store_true", help="Also install policies.json (uBlock Origin) & AutoConfig.")
     parser.add_argument("--strict", action="store_true", help="Append strict anti-fingerprinting (RFP) overrides.")
+    parser.add_argument(
+        "--low-memory",
+        action="store_true",
+        help="Append the low-memory override (fewer content processes; disables Fission isolation).",
+    )
     parser.add_argument("--uninstall", action="store_true", help="Remove SheepFox files from target profile/system.")
     parser.add_argument("--dry-run", action="store_true", help="Preview installation paths without modifying disk.")
     parser.add_argument(
@@ -312,7 +320,7 @@ def main() -> int:
         return 1
 
     if profile_dir:
-        payload = compose_user_js(strict=args.strict)
+        payload = compose_user_js(strict=args.strict, low_memory=args.low_memory)
         backup_and_write(profile_dir / "user.js", payload, dry_run=args.dry_run)
 
         if args.no_ui:
