@@ -19,8 +19,22 @@
 ## Upstream Security Updates
 
 - **Drop-In Mode:** SheepFox deliberately sets `DisableAppUpdate` to **unset/false** in `policies.json` so stock Firefox continues receiving critical Mozilla security updates immediately.
-- **Fork Build Mode:** Track upstream Firefox security advisories and bump `build/firefox-version.json` promptly upon every Mozilla point release.
+- **Fork Build Mode:** Track upstream Firefox security advisories and bump `mozmozbuild/firefox-version.json` promptly upon every Mozilla point release.
 
 ## Reporting a Vulnerability
 
 If you discover a security regression caused by a SheepFox preference, policy, installer script, or source patch, please open a security advisory on the repository host before disclosing exploit details publicly.
+
+## Verifying a Release Yourself
+
+Every claim in this repository is checkable without trusting the maintainers:
+
+```bash
+python3 mozbuild/scripts/build-configs.py --check   # generated configs match the modules
+python3 -m unittest discover -s tests -v            # invariants, policies, patches, installers
+git apply --check -p1 patches/0001-*.patch          # patches apply to the pinned Firefox tree
+```
+
+`mozbuild/scripts/fetch-source.sh` downloads Mozilla's signed `SHA512SUMS` for the pinned release
+and refuses to extract a tarball whose SHA-512 does not match, so a tampered mirror is detected
+before any code is compiled.

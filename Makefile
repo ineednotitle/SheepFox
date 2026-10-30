@@ -1,49 +1,61 @@
-# (SheepFox) Firefox — Unified Build & Configuration Makefile
-# This Source Code Form is subject to the terms of the Mozilla Public License, v. 2.0.
+# ============================================================================
+# (SheepFox) Firefox — unified build & configuration entry points
+# This Source Code Form is subject to the terms of the Mozilla Public License 2.0.
+# ============================================================================
 
 PYTHON ?= python3
+TARGET ?= auto
+SHEEPFOX_SRC ?= $(CURDIR)/mozbuild/firefox-src
 
-.PHONY: help build-configs check test install-dry-run install fetch-source patch-source build-browser clean
+.PHONY: help build-configs check test test-verbose install install-dry-run \
+        fetch-source patch-source build-browser clean verify
 
 help:
 	@echo "(SheepFox) Firefox — Project Commands"
 	@echo "======================================"
-	@echo "Config Suite (Drop-in for Stock Firefox):"
-	@echo "  make build-configs     Compile modular configs into config/user.js & config/autoconfig/sheepfox.cfg"
-	@echo "  make check             Verify compiled configs are in sync with modules"
-	@echo "  make test              Run automated validation tests (JS prefs, policies, mozconfigs, patches)"
-	@echo "  make install-dry-run   Preview profile & policy installation on current system"
-	@echo "  make install           Apply SheepFox configs to detected Firefox profile"
+	@echo "Drop-in config suite (works on stock Firefox):"
+	@echo "  make build-configs   Compile config/modules/*.js -> user.js + sheepfox.cfg"
+	@echo "  make check           Verify the generated configs are in sync (CI gate)"
+	@echo "  make test            Run the full verification suite"
+	@echo "  make install         Apply SheepFox to the detected Firefox profile"
+	@echo "  make install-dry-run Preview every path that would be touched"
 	@echo ""
-	@echo "Custom Fork Build (Compile SheepFox from Upstream Source):"
-	@echo "  make fetch-source      Download & verify pinned Firefox upstream source tarball"
-	@echo "  make patch-source      Apply SheepFox patches, branding, and default policies to source tree"
-	@echo "  make build-browser     Compile optimized SheepFox binary (Cross-LTO + PGO)"
-	@echo "  make clean             Remove temporary build caches"
+	@echo "Custom fork build (compile (SheepFox) Firefox from upstream source):"
+	@echo "  make fetch-source    Download + SHA-512 verify the pinned Firefox source"
+	@echo "  make patch-source    Inject branding/policies and apply patches/series"
+	@echo "  make build-browser   ./mach configure && build && package  (TARGET=$(TARGET))"
+	@echo "                       TARGET=linux-x86_64|linux-aarch64|windows-x86_64|macos-universal"
+	@echo "                       SHEEPFOX_PGO=1 make build-browser   # two-stage PGO"
+	@echo "  make clean           Remove caches and staged fork artifacts"
+	@echo "  make verify          build-configs + check + test (what CI runs)"
 
 build-configs:
-	$(PYTHON) build/scripts/build-configs.py
+	$(PYTHON) mozbuild/scripts/build-configs.py
 
 check:
-	$(PYTHON) build/scripts/build-configs.py --check
+	$(PYTHON) mozbuild/scripts/build-configs.py --check
 
 test:
 	$(PYTHON) -m unittest discover -s tests -v
 
-install-dry-run:
-	$(PYTHON) scripts/install.py --dry-run
-
 install:
 	$(PYTHON) scripts/install.py
 
+install-dry-run:
+	$(PYTHON) scripts/install.py --dry-run
+
 fetch-source:
-	bash build/scripts/fetch-source.sh
+	bash mozbuild/scripts/fetch-source.sh
 
 patch-source:
-	bash build/scripts/apply-patches.sh
+	SHEEPFOX_SRC_DIR=$(SHEEPFOX_SRC) bash mozbuild/scripts/apply-patches.sh
 
 build-browser:
-	bash build/scripts/build-browser.sh
+	SHEEPFOX_SRC_DIR=$(SHEEPFOX_SRC) bash mozbuild/scripts/build-browser.sh --target $(TARGET)
+
+verify: check test
+	@echo "All SheepFox verification gates passed."
 
 clean:
-	rm -rf __pycache__ tests/__pycache__ .pytest_cache
+	rm -rf __pycache__ tests/__pycache__ .pytest_cache mozbuild/staging
+	rm -f mozbuild/.last-objdir

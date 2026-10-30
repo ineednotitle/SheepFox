@@ -1,174 +1,292 @@
 # (SheepFox) Firefox
 
 <p align="center">
-  <img src="branding/sheepfox/content/sheepfox-logo.svg" alt="(SheepFox) Firefox Logo" width="136" height="136" />
+  <img src="branding/sheepfox/content/sheepfox-logo.svg" alt="(SheepFox) Firefox logo" width="132" height="132" />
 </p>
 
 <p align="center">
-  <strong>Brave-Class Speed · LibreFox-Grade Privacy · Upstream Gecko Stability · Zero Site Breakage</strong>
+  <strong>Brave-class page-load speed · LibreFox-grade privacy · upstream Gecko stability · zero site breakage</strong>
+</p>
+
+<p align="center">
+  <code>MPL-2.0</code> · <code>Firefox 159.0</code> pin · <code>131 prefs</code> · <code>4 verified upstream patches</code>
 </p>
 
 ---
 
-## Overview
+## What SheepFox is
 
-**(SheepFox) Firefox** (`SheepFox`) is a hybrid Firefox engineering project built to solve a frustrating trade-off in modern browsers:
+**(SheepFox) Firefox** — repo slug `SheepFox` — is a hybrid Firefox engineering project that fixes
+the trade-off every hardening guide forces on you:
 
-- **Stock Firefox** ships with telemetry pings, sponsored tiles, Pocket, Privacy-Preserving Attribution (PPA), background ML/AI processes, conservative network limits, and no built-in ad/tracker blocker—making page loads noticeably slower than **Brave**.
-- **Ultra-strict hardened forks** often enable aggressive `resistFingerprinting` (RFP) or disable WebGL/caches/JIT—locking monitors to 60Hz, forcing light mode, spoofing timezones, breaking Canvas apps, and *hurting* real-world performance.
+* **Stock Firefox** ships telemetry pings, sponsored New Tab tiles, Pocket, background ML/LLM
+  workers, conservative network limits and no ad blocker. Pages load measurably slower than in
+  Brave.
+* **Ultra-strict hardened forks** turn on `privacy.resistFingerprinting`, which caps 120Hz/144Hz
+  panels at 60 Hz, forces light mode, spoofs your timezone to UTC, adds Canvas noise that breaks
+  real apps — and *hurts* real-world responsiveness.
 
-**SheepFox bridges both worlds.** It delivers **Brave-level page-load responsiveness** and **LibreFox-inspired privacy hardening** without sacrificing Gecko stability, hardware acceleration, 120Hz+ smoothness, or everyday website compatibility.
+SheepFox gives you both halves, in one repository, in two independent modes:
 
-Because SheepFox uses a **Hybrid Architecture**, you can use it in two ways:
-1. **Drop-In Config & Policy Suite (10-Second Setup on Stock Firefox):** Apply `user.js`, AutoConfig (`sheepfox.cfg`), and **SheepShields** (`policies.json` + automatic uBlock Origin provisioning) directly to your existing Firefox installation on Windows, Linux, or macOS.
-2. **Custom Browser Fork Build Scaffold (Compile from Source):** Build a standalone branded **SheepFox** binary from upstream Mozilla source with Cross-Language LTO (`--enable-lto=cross`), `x86-64-v3` (AVX2/FMA) / Apple Silicon / ARM64 optimizations, PGO, and compile-time telemetry stripping.
+| | What it gives you | Works on |
+| :--- | :--- | :--- |
+| **Mode 1 — Drop-in suite** | Modular prefs → `user.js`, a system AutoConfig (`sheepfox.cfg`), and **SheepShields** enterprise policy that auto-installs uBlock Origin with curated filter lists | Any stock Firefox on Windows, Linux, macOS (standard, Flatpak, Snap) |
+| **Mode 2 — Fork scaffold** | Branding, mozconfigs, a verified patch series and CI to compile a standalone **SheepFox** binary from pinned Mozilla source with cross-language LTO, `x86-64-v3`, LLD and optional PGO | Build host: Linux / Windows (MozillaBuild) / macOS |
+
+Mode 1 takes about ten seconds. Mode 2 takes about an hour of CPU and 40 GB of disk.
 
 ---
 
-## Why SheepFox Feels Like Brave (Without Losing Stability)
+## Why it feels like Brave without inheriting Brave's problems
 
-| Pillar | Stock Firefox | Strict Hardened Configs | **(SheepFox) Firefox** |
+| Pillar | Stock Firefox | Strict hardening | **(SheepFox) Firefox** |
 | :--- | :--- | :--- | :--- |
-| **Out-of-Box Ad & Tracker Blocking** | None (loads 100% of ad/tracker bloat) | Manual setup required | **SheepShields (`policies.json`)** auto-installs uBlock Origin + curated privacy/spyware lists |
-| **GPU & Rendering Pipeline** | Conservative defaults | Often disables WebGL / Canvas acceleration | **Full WebRender + Shader Pre-cache + 512 MB Accelerated Canvas + 20 MB Skia Font Cache** |
-| **Caching Strategy** | Disk I/O heavy | Often disables all caches (slow reloads) | **RAM-First 256 MB Cache + 4-Page 0ms Back/Forward Cache (`bfcache`)** |
-| **Network Transport** | Throttled request pacing, 6 conn/host | Speculative & HTTP/3 sometimes restricted | **HTTP/3 (QUIC) + Unpaced Burst Requests + 1800 Max Conn / 10 Persistent per Host** |
-| **Certificate Revocation** | Live OCSP queries (slow + leaks domains) | Hard-fail OCSP (breaks sites when OCSP lags) | **Mozilla CRLite Local Binary Filters** (0ms latency, zero domain leakage) |
-| **Anti-Fingerprinting** | Minimal | Strict RFP (locks 60Hz, breaks Canvas/dark mode) | **Granular Fingerprinting Protection (`FPP`) + Total Cookie Protection (dFPI) + GPC** |
-| **Telemetry, PPA & AI Bloat** | Active by default | Stripped | **100% Stripped & Locked (`@lock`)** — Zero Telemetry, Studies, Pocket, PPA, or background LLM workers |
-| **High-Refresh Displays** | Standard | Capped at 60Hz under RFP | **Full 120Hz / 144Hz / 240Hz MSD Spring Physics (`04-smoothfox.js`)** |
+| **Ad & tracker blocking** | none — every ad byte is downloaded | manual | **SheepShields `policies.json`** auto-installs uBlock Origin + `easylist`, `easyprivacy`, `ublock-badware`, `ublock-privacy`, `urlhaus-1` |
+| **GPU / rendering** | conservative defaults | often disables WebGL and Canvas accel | **WebRender + shader precache + 512 MB accelerated Canvas + 20 MB Skia font cache** |
+| **Caching** | disk-I/O heavy | often disables caches | **256 MB RAM cache (disk cache off) + 4-page bfcache** |
+| **Network transport** | paced requests, 6 conns/host | speculative fetches disabled by default | **HTTP/3 QUIC, unpaced bursts, 1800 max conns, 10 persistent per host** |
+| **Certificate revocation** | live OCSP (slow, leaks every domain) | hard-fail OCSP (breaks sites) | **local Mozilla CRLite filters — 0 ms, zero domain leakage** (`security.OCSP.enabled = 0`, `crlite_mode = 2`) |
+| **Anti-fingerprinting** | minimal | **RFP**: 60 Hz cap, forced light mode, UTC spoofing, Canvas noise | **granular `privacy.fingerprintingProtection`** — protects against fingerprinting *categories*, leaves refresh rate, timezone, dark mode and WebGL intact |
+| **Telemetry, PPA, AI** | on by default | stripped | **stripped and `lockPref`-locked**; `browser.ml.enable = false` stops the LLM worker process entirely |
+| **High-refresh displays** | standard | capped at 60 Hz | **120/144/240 Hz mass-spring-damper scroll + APZ physics** |
+
+The one rule that makes this safe: **`privacy.resistFingerprinting` stays `false` by default.**
+If you *want* strict RFP, install with `--strict` (`config/overrides/strict-paranoia.override.js`);
+it is deliberately never part of the default profile.
 
 ---
 
-## Repository Architecture
+## Repository layout
 
 ```text
 SheepFox/
-├── config/                              # PART 1: Drop-In Config, AutoConfig & SheepShields Suite
-│   ├── modules/                         # Modular source preferences (edit here!)
-│   │   ├── 01-speedfox.js               # WebRender, Skia, RAM cache, HTTP/3 & connection concurrency
-│   │   ├── 02-shieldfox.js              # LibreFox privacy: dFPI, FPP, CRLite, DoH, GPC, Telemetry/PPA lock
-│   │   ├── 03-cleanfox.js               # Removes Pocket, Sponsored Ads, QuickSuggest & background ML/AI
-│   │   └── 04-smoothfox.js              # 120Hz+ Mass-Spring-Damper scroll & APZ input physics
-│   ├── user.js                          # Compiled unified profile drop-in file
-│   ├── autoconfig/                      # LibreFox-style system-wide AutoConfig
-│   │   ├── sheepfox.cfg                 # Uses lockPref() for telemetry/ads & defaultPref() for user freedom
-│   │   └── defaults/pref/local-settings.js
-│   ├── distribution/
-│   │   └── policies.json                # SheepShields: Enterprise policy auto-installing uBlock Origin
-│   └── overrides/
-│       ├── user-overrides.example.js    # Template for personal preferences
-│       └── strict-paranoia.override.js  # Opt-in strict RFP override (--strict)
+├── config/                          # MODE 1 — drop-in config, AutoConfig & SheepShields
+│   ├── modules/                     # the only files you edit
+│   │   ├── 01-speedfox.js           # WebRender, Skia, RAM cache, HTTP/3, 1800 conns
+│   │   ├── 02-shieldfox.js          # dFPI, FPP, GPC, CRLite, DoH, WebRTC, telemetry locks
+│   │   ├── 03-cleanfox.js           # Pocket, sponsored tiles, QuickSuggest, browser.ml.*
+│   │   └── 04-smoothfox.js          # 120Hz+ MSD scroll & APZ physics
+│   ├── user.js                      # generated — `make build-configs`
+│   ├── autoconfig/
+│   │   ├── defaults/pref/local-settings.js   # general.config.* bootstrap
+│   │   └── sheepfox.cfg                      # generated AutoConfig (line 1 is a comment)
+│   ├── distribution/policies.json   # SheepShields: telemetry off + uBlock Origin on
+│   └── overrides/                   # user-overrides.example.js, strict-paranoia.override.js
 │
-├── branding/sheepfox/                   # PART 2: Custom (SheepFox) Firefox Branding Assets
-│   ├── configure.sh                     # App metadata & compile-time telemetry guards
-│   ├── locales/en-US/                   # Fluent (brand.ftl), DTD, and properties strings
-│   └── content/                         # Vector shield/fox/sheep logo & wordmark SVGs
+├── branding/sheepfox/               # MODE 2 — SheepFox brand assets
+│   ├── configure.sh                 # MOZ_APP_NAME=sheepfox, telemetry env cleared
+│   ├── branding.nsi                 # Windows installer strings
+│   ├── locales/en-US/               # brand.ftl / brand.dtd / brand.properties
+│   └── content/                     # sheepfox-logo.svg, about-wordmark.svg
 │
-├── build/                               # PART 3: Custom Browser Fork Build System
-│   ├── firefox-version.json             # Pinned upstream Mozilla Firefox release manifest
-│   ├── mozconfig.common                 # Shared hardening, Rust SIMD, JPEG-XL & telemetry removal
-│   ├── mozconfig.linux-x86_64           # AVX2 (x86-64-v3) + LLD + Cross-LTO + optional PGO
-│   ├── mozconfig.linux-aarch64          # ARM64 NEON + LLD + LTO
-│   ├── mozconfig.windows-x86_64         # Windows clang-cl + Cross-LTO + AVX2
-│   ├── mozconfig.macos-universal        # macOS Apple Silicon / Universal2 Cross-LTO
-│   └── scripts/                         # Config compiler, source fetcher, patcher & mach builder
+├── mozbuild/                        # MODE 2 — fork build scaffold (never `build/`: keep it
+│   ├── firefox-version.json         #   visible to every tool and snapshot)
+│   ├── mozconfig.common             # release, hardening, rust-simd, no crashreporter/updater
+│   ├── mozconfig.linux-x86_64       # x86-64-v3, LLD, --enable-lto=cross, optional PGO
+│   ├── mozconfig.linux-aarch64
+│   ├── mozconfig.windows-x86_64
+│   ├── mozconfig.macos-universal
+│   └── scripts/
+│       ├── build-configs.py         # module compiler + `--check` gate
+│       ├── fetch-source.sh          # download + SHA-512 verify the pinned tarball
+│       ├── apply-patches.sh         # branding, staging, patches/series
+│       └── build-browser.sh         # mach configure → build → package → inject config
 │
-├── patches/                             # Upstream Gecko Unified Diff Patch Series
-├── scripts/                             # Cross-platform installers (Python, Bash, PowerShell)
-├── tests/                               # Automated verification suite (prefs, policies, SVGs, patches)
-└── .github/workflows/                   # CI config validation & Linux release build pipelines
+├── patches/                         # verified against FIREFOX_159_0_RELEASE
+│   ├── series
+│   └── 0001…0004-*.patch
+├── scripts/                         # install.py, install-unix.sh, install-windows.{bat,ps1}
+├── tests/test_repo.py               # 40 tests, stdlib only
+└── .github/workflows/               # validate-configs.yml, build-sheepfox.yml
 ```
 
 ---
 
-## Quick Start: Mode 1 — Drop-In Install on Stock Firefox (Recommended)
+## Quick start — Mode 1: drop-in on stock Firefox
 
-Apply SheepFox directly to your existing Firefox installation in seconds. Automatic backups of any existing `user.js` are created before changes are written.
+Backups of any existing `user.js` are written first (`user.js.sheepfox-backup-<timestamp>`).
 
-### Linux & macOS
+### Linux
 
 ```bash
-# 1. Apply Speed + Privacy user.js to your active Firefox profile (Standard, Flatpak, or Snap):
-./scripts/install-unix.sh
+git clone https://github.com/ineednotitle/SheepFox.git && cd SheepFox
+./scripts/install-unix.sh --dry-run      # preview every path first
 
-# 2. (Recommended) Also install SheepShields (auto-installs uBlock Origin) + System AutoConfig:
-sudo ./scripts/install-unix.sh --system
+./scripts/install-unix.sh                # profile only: speed + privacy user.js
+sudo ./scripts/install-unix.sh --system  # + AutoConfig + SheepShields (uBlock Origin)
 ```
 
-### Windows (PowerShell)
+Flatpak (`~/.var/app/org.mozilla.firefox/...`) and Snap (`~/snap/firefox/common/...`) profiles
+are detected automatically; system dirs for both are probed for `--system`.
+
+### macOS
+
+```bash
+git clone https://github.com/ineednotitle/SheepFox.git && cd SheepFox
+./scripts/install-unix.sh --dry-run
+./scripts/install-unix.sh                            # ~/Library/Application Support/Firefox
+sudo ./scripts/install-unix.sh --system              # + /Applications/Firefox.app/Contents/Resources
+```
+
+### Windows
+
+Double-click or run the `.bat` launcher — it bypasses `ExecutionPolicy` for you, so you will
+never see *"…install-windows.ps1 is not digitally signed"*:
+
+```bat
+scripts\install-windows.bat
+scripts\install-windows.bat -System -Strict
+scripts\install-windows.bat -Uninstall -System
+```
+
+The launcher calls
+`powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0install-windows.ps1" %*`.
+The PowerShell installer unblocks downloaded files, parses
+`%APPDATA%\Mozilla\Firefox\profiles.ini` (`[Install*] Default=` first), auto-elevates through UAC
+for `-System`, and writes every file as **BOM-free UTF-8** via
+`New-Object System.Text.UTF8Encoding($false)`.
+
+Cross-platform alternative:
 
 ```powershell
-# 1. Profile-level Speed + Privacy user.js:
-.\scripts\install-windows.ps1
-
-# 2. Full installation including SheepShields (uBlock Origin policy) & AutoConfig (Run as Administrator):
-.\scripts\install-windows.ps1 -System
+python scripts\install.py --dry-run
+python scripts\install.py --strict
+python scripts\install.py --system --uninstall
 ```
 
-### Optional Modes & Uninstall
+### Reverting
 
 ```bash
-# Preview what will be installed without modifying files:
-python3 scripts/install.py --dry-run
-
-# Enable optional "Strict Paranoia" mode (enables strict ResistFingerprinting):
-python3 scripts/install.py --strict
-
-# Cleanly uninstall SheepFox files:
-python3 scripts/install.py --system --uninstall
+python3 scripts/install.py --system --uninstall     # removes what SheepFox installed
 ```
+
+Timestamped backups are always left in place; restore the newest
+`user.js.sheepfox-backup-*` to get your old profile config back.
 
 ---
 
-## Quick Start: Mode 2 — Build Custom Branded SheepFox from Source
-
-For maintainers and power users building standalone **(SheepFox) Firefox** binaries:
+## Quick start — Mode 2: build (SheepFox) Firefox from source
 
 ```bash
-# 1. Download & verify pinned upstream Firefox source archive (SHA-512 checked):
+# 0. build dependencies once
+./mach bootstrap --application-choice browser      # inside the fetched tree
+
+# 1. download + SHA-512 verify the pinned Firefox 159.0 source tarball
 make fetch-source
 
-# 2. Compile configs, inject SheepFox branding, and apply Gecko patches:
+# 2. compile configs, inject branding/policies, apply patches/series
 make patch-source
 
-# 3. Build optimized SheepFox release package (set SHEEPFOX_PGO=1 for 2-stage PGO):
-SHEEPFOX_PGO=1 make build-browser
+# 3. configure → build → package → inject AutoConfig (add SHEEPFOX_PGO=1 for 2-stage PGO)
+make build-browser TARGET=linux-x86_64
 ```
+
+Supported `TARGET` values:
+
+| Target | Optimisation | Typical host |
+| :--- | :--- | :--- |
+| `linux-x86_64` | `-march=x86-64-v3` (AVX2/FMA), LLD, `--enable-lto=cross`, optional PGO | Linux x86_64 |
+| `linux-aarch64` | ARMv8-A + NEON, LLD, `--enable-lto=full` | ARM64 Linux |
+| `windows-x86_64` | clang-cl, `x86-64-v3`, LLD, `--enable-lto=cross` | Windows + MozillaBuild |
+| `macos-universal` | two slices (`aarch64` + `x86_64`) lipo-merged | macOS + Xcode CLT |
+
+Artifacts land in `mozbuild/firefox-src/obj-*/dist/`, with `sheepfox.cfg`,
+`defaults/pref/local-settings.js` and `distribution/policies.json` injected into `dist/bin` by
+`build-browser.sh`, so the packaged browser behaves exactly like a Mode 1 install.
+
+**Build notes (verified against the pinned tag, not guessed):**
+
+* `--enable-jxl` is **not** a Firefox 159 configure switch; JPEG-XL ships compiled in and gated by
+  `image.jxl.enabled` (already `true` upstream). Passing an unknown switch aborts configure.
+* `gfx.webrender.all` is *not* forced in the patch series: Firefox picks WebRender per GPU/driver,
+  and forcing it on unsupported hardware is the classic GPU-process crash. SheepFox sets it in
+  `01-speedfox.js` where a user can revert it, and never disables `layers.gpu-process.enabled`.
+* `x86-64-v3` requires Haswell (2013+) or Excavator/Zen (2015+). For older CPUs build with
+  `linux-aarch64`-style generic flags instead of `linux-x86_64`.
+* The patch series is generated against `FIREFOX_159_0_RELEASE` and every patch passes
+  `git apply --check` against that exact tag. Bumping `mozbuild/firefox-version.json` requires
+  re-verifying the series.
 
 ---
 
-## Development & Verification
-
-Never edit `config/user.js` or `config/autoconfig/sheepfox.cfg` by hand—edit the modular files inside `config/modules/` and recompile:
+## Verification
 
 ```bash
-# Compile modular configs into user.js and sheepfox.cfg:
-make build-configs
-
-# Verify sync & run all 7 automated validation test suites:
-make check
-make test
+make build-configs     # regenerate user.js + sheepfox.cfg from config/modules/*.js
+make check             # fail if either generated file is stale
+make test              # 40 tests (stdlib unittest, no dependencies)
+make verify            # check + test
 ```
 
-### How `@lock` Annotations Work (LibreFox Evolution)
+What the suite enforces:
 
-Classic LibreFox locked nearly all preferences, preventing users from changing settings in `about:preferences`. SheepFox uses smart selective locking in `config/modules/*.js`:
-- Lines tagged with `// @lock` compile to `lockPref(...)` in `sheepfox.cfg` (**strictly reserved** for telemetry, Normandy studies, sponsored ads, Pocket, and PPA).
-- All other lines compile to `defaultPref(...)` in `sheepfox.cfg`, giving you hardened, ultra-fast defaults while allowing effortless customization in Firefox's Settings UI.
+1. `config/modules/*.js` ↔ `config/user.js` ↔ `config/autoconfig/sheepfox.cfg` stay in sync.
+2. `sheepfox.cfg` line 1 is a comment, contains no `user_pref(`, and uses `lockPref()` **only**
+   for `// @lock` lines (everything else is `defaultPref()`, so it stays editable in Settings).
+3. Core speed/privacy invariants: dFPI `cookieBehavior = 5`, GPC, query stripping, HTTPS-Only,
+   CRLite (`OCSP.enabled = 0`, `crlite_mode = 2`), Quad9 DoH (`trr.mode = 2`), WebRTC
+   `default_address_only`, 512 MB canvas cache, 20 MB Skia cache, 256 MB RAM cache, HTTP/3,
+   1800 connections, 4-page bfcache.
+4. Zero-breakage invariants: `resistFingerprinting = false` and **not locked**,
+   `fingerprintingProtection = true`, `layers.gpu-process.enabled = true`.
+5. Telemetry/PPA/studies/Pocket/sponsored/ML preferences are `false` **and** locked.
+6. `policies.json` provisions uBlock Origin (`uBlock0@raymondhill.net`, `normal_installed`) with the
+   curated filter lists, and never disables application updates.
+7. Branding SVGs parse as XML, are vector-only (no `<script>`, no raster `<image>`).
+8. Every patch matches its own diffstat, every hunk's line counts match its `@@` header, and
+   `patches/series` lists exactly the `.patch` files present.
+9. Windows `.bat`/`.ps1` are BOM-free, CRLF, contain the `ExecutionPolicy Bypass` invocation,
+   `Unblock-File`, UAC re-launch and `UTF8Encoding($false)` writes.
+10. A mock profile exercises install → backup → `--system` → `--strict` → `--uninstall`, and
+    `--dry-run` is proven to write nothing.
 
 ---
 
-## Push This Repository to GitHub / Codeberg / GitLab
+## How `// @lock` works
 
-```bash
-git remote add origin https://github.com/<your-username>/SheepFox.git
-git push -u origin main
+Only data-transmitting preferences are locked:
+
+```js
+user_pref("toolkit.telemetry.enabled", false); // @lock   ->  lockPref(...)   in sheepfox.cfg
+user_pref("gfx.webrender.all", true);                     ->  defaultPref(...) in sheepfox.cfg
 ```
+
+`lockPref()` cannot be overridden from `about:preferences`; `defaultPref()` sets a hardened
+default the user may still change. That is the difference between "private by default" and
+"a fork that fights you".
 
 ---
 
-## Acknowledgements & Lineage
+## Known trade-offs (read before filing a bug)
 
-- Inspired by the privacy vision of **LibreFox** / **LibreWolf**, the zero-breakage engineering of **Betterfox**, the out-of-the-box shield experience of **Brave**, and the compiler optimizations of **Mercury**.
-- Licensed under the **[Mozilla Public License 2.0 (MPL-2.0)](LICENSE)**.
+* **Disk cache is off** (`browser.cache.disk.enable = false`) in favour of a 256 MB RAM cache.
+  On machines with less than ~4 GB RAM, re-enable it via
+  `config/overrides/user-overrides.example.js`.
+* **Captive-portal detection is off** (`network.captive-portal-service.enabled = false`) because it
+  is a background phone-home. Hotel/airport Wi-Fi portals therefore need one manual visit to the
+  portal URL.
+* **DoH mode 2** prefers Quad9 but still falls back to system DNS, so LAN-only devices and captive
+  portals keep working. `--strict` switches to mode 3 (no fallback).
+* **A few legacy preferences are pinned defensively.** `toolkit.telemetry.*`, `toolkit.coverage.*`,
+  `dom.private-attribution.submission.enabled` and `extensions.pocket.enabled` are kept in the
+  profiles even where a given Firefox release no longer reads them: they cover older releases and
+  ESR, and they keep a future reintroduction switched off. Every *speed* preference shipped here
+  exists in Firefox 159's `StaticPrefList.yaml` / `all.js` / `firefox.js`.
+* **No benchmark claims.** Numbers vary by machine, network and page. The defaults here are the
+  documented Gecko/WebRender/Necko knobs that move first-paint latency and scroll smoothness, not
+  invented measurements.
+
+---
+
+## Contributing & security
+
+* [`CONTRIBUTING.md`](CONTRIBUTING.md) — pref/patch workflow and the three invariants.
+* [`SECURITY.md`](SECURITY.md) — threat model and how to report a regression.
+* LICENSE: **[MPL-2.0](LICENSE)**.
+
+## Acknowledgements
+
+Inspired by **LibreFox/LibreWolf** (privacy vision), **Betterfox** (zero-breakage tuning),
+**Brave Shields** (out-of-the-box blocking) and **Mercury** (compiler optimisation). Built entirely
+on Mozilla Firefox source, and not affiliated with or endorsed by Mozilla. Firefox is a trademark
+of the Mozilla Foundation.

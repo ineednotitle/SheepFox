@@ -25,6 +25,28 @@ Thank you for helping make **(SheepFox) Firefox** faster and more private! Every
 
 ## Workflow for Adding Source Patches
 
-1. Format patches as clean unified git diffs (`-p1`) against the upstream version specified in `build/firefox-version.json`.
+1. Format patches as clean unified git diffs (`-p1`) against the upstream version specified in `mozmozbuild/firefox-version.json`.
 2. Place the `.patch` file in `patches/` with a numbered prefix (`0005-...patch`) and append its filename to `patches/series`.
-3. Run `make test` to validate unified diff hunk line counts automatically.
+3. Run `make test` to validate unified diff hunk line counts and diffstat totals automatically,
+   then `make patch-source` against the pinned tree to confirm every patch applies.
+
+## Workflow for the Fork Build Scaffold
+
+1. `mozbuild/` holds the build machinery — it is deliberately **not** called `build/` or `dist/`
+   so that sandbox snapshots, CI caches and packagers never exclude it.
+2. Only use configure switches that exist in the pinned Firefox tag. An unknown
+   `ac_add_options` aborts `./mach configure` with `Unknown option: …`, so verify against
+   `build/moz.configure/*.configure` before adding one (for example, Firefox 159 has no
+   `--enable-jxl` switch — JPEG-XL is gated by the `image.jxl.enabled` pref).
+3. Never force GPU paths that Firefox enables per driver (`gfx.webrender.all` in the patch series,
+   disabling `layers.gpu-process.enabled`, …). Those belong in `config/modules/01-speedfox.js`
+   where a user can revert them.
+
+## Running the gates locally
+
+```bash
+make build-configs     # regenerate user.js + sheepfox.cfg
+make check             # fail if the generated files are stale
+make test              # config invariants, policies, patches, launchers, installers
+make verify            # check + test, exactly what CI runs
+```
