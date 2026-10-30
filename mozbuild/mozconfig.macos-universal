@@ -1,0 +1,31 @@
+# ============================================================================
+# (SheepFox) Firefox — macOS release mozconfig (Apple Silicon by default)
+#
+# Firefox has no single "build a universal app" configure switch; a universal2
+# .app is the lipo of two complete builds. This mozconfig builds one slice:
+#
+#   SHEEPFOX_MAC_TARGET=aarch64-apple-darwin   (default, Apple Silicon)
+#   SHEEPFOX_MAC_TARGET=x86_64-apple-darwin    (Intel)
+#
+# `make build-browser TARGET=macos-universal` runs both slices and lipo-merges
+# them (see mozbuild/scripts/build-browser.sh).
+# ============================================================================
+. "$topsrcdir/../mozbuild/mozconfig.common"
+
+# --- One architecture slice -------------------------------------------------
+export SHEEPFOX_MAC_TARGET=${SHEEPFOX_MAC_TARGET:-aarch64-apple-darwin}
+ac_add_options --target=${SHEEPFOX_MAC_TARGET}
+
+# --- Full LTO (smaller, faster libxul) --------------------------------------
+ac_add_options --enable-lto=full
+
+# --- Optional two-stage PGO (same contract as the Linux mozconfigs) ---------
+if [ "${SHEEPFOX_PGO:-0}" = "1" ]; then
+  export MOZ_PGO=1
+  if [ -n "${SHEEPFOX_PGO_PROFILE:-}" ]; then
+    ac_add_options --enable-profile-use=cross
+    ac_add_options --with-pgo-profile-path=${SHEEPFOX_PGO_PROFILE}
+  else
+    ac_add_options --enable-profile-generate=cross
+  fi
+fi

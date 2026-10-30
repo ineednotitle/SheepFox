@@ -1,27 +1,61 @@
-From 0000000000000000000000000000000000000002 Mon Sep 17 00:00:00 2001
-From: SheepFox Maintainers <maintainers@sheepfox.project>
-Date: Fri, 30 Oct 2026 00:00:00 +0000
-Subject: [PATCH 2/4] Disable Pocket, sponsored New Tab tiles, and QuickSuggest ads
+From 11d22de37c4c6616a637d28f34e8debb00797d92 Mon Sep 17 00:00:00 2001
+From: SheepFox Maintainers <maintainers@sheepfox.dev>
+Date: Fri, 30 Oct 2026 16:33:25 +0000
+Subject: [PATCH] Remove Pocket, sponsored New Tab tiles and upsell endpoints
 
+* browser.newtabpage.activity-stream.discoverystream.region-spocs-config is
+    emptied, so no sponsored stories are requested for any region.
+  * The New Tab private telemetry ping and the sync flags that would otherwise
+    re-enable sponsored tiles on a fresh profile are off.
+  * browser.vpn_promo.enabled is off, removing Mozilla VPN upsells from the
+    toolbar, New Tab and about:preferences.
+
+Pocket itself (extensions.pocket.enabled) plus the URL-bar QuickSuggest
+sponsored/non-sponsored results are disabled in config/modules/03-cleanfox.js so
+they can still be re-enabled per profile by a user who wants them.
 ---
  browser/app/profile/firefox.js | 10 +++++-----
  1 file changed, 5 insertions(+), 5 deletions(-)
 
 diff --git a/browser/app/profile/firefox.js b/browser/app/profile/firefox.js
-index 9c30e14..7f19d02 100644
+index 02205ee..74a6832 100644
 --- a/browser/app/profile/firefox.js
 +++ b/browser/app/profile/firefox.js
-@@ -1820,6 +1820,6 @@
- // Pocket & New Tab Sponsored Streams
--pref("extensions.pocket.enabled", true);
--pref("browser.newtabpage.activity-stream.showSponsored", true);
--pref("browser.newtabpage.activity-stream.showSponsoredTopSites", true);
--pref("browser.urlbar.suggest.quicksuggest.sponsored", true);
+@@ -1810,8 +1810,8 @@ pref("services.sync.prefs.sync.browser.menu.showViewImageInfo", true);
+ pref("services.sync.prefs.sync.browser.newtabpage.activity-stream.asrouter.userprefs.cfr.addons", true);
+ pref("services.sync.prefs.sync.browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features", true);
+ pref("services.sync.prefs.sync.browser.newtabpage.activity-stream.showSearch", true);
+-pref("services.sync.prefs.sync.browser.newtabpage.activity-stream.showSponsored", true);
+-pref("services.sync.prefs.sync.browser.newtabpage.activity-stream.showSponsoredTopSites", true);
++pref("services.sync.prefs.sync.browser.newtabpage.activity-stream.showSponsored", false);
++pref("services.sync.prefs.sync.browser.newtabpage.activity-stream.showSponsoredTopSites", false);
+ pref("services.sync.prefs.sync.browser.newtabpage.activity-stream.feeds.topsites", true);
+ pref("services.sync.prefs.sync.browser.newtabpage.activity-stream.topSitesRows", true);
+ pref("services.sync.prefs.sync.browser.newtabpage.activity-stream.feeds.section.topstories", true);
+@@ -2191,7 +2191,7 @@ pref("browser.newtabpage.activity-stream.discoverystream.ohttp.configURL", "http
+ pref("browser.newtabpage.activity-stream.discoverystream.imageProxy.enabled", true);
+ 
+ // List of regions that get spocs by default.
+-pref("browser.newtabpage.activity-stream.discoverystream.region-spocs-config", "US,CA,DE,GB,FR,IT,ES");
++pref("browser.newtabpage.activity-stream.discoverystream.region-spocs-config", "");
+ // List of regions that don't get the 7 row layout.
+ pref("browser.newtabpage.activity-stream.discoverystream.region-basic-config", "");
+ 
+@@ -2199,7 +2199,7 @@ pref("browser.newtabpage.activity-stream.discoverystream.region-basic-config", "
+ pref("browser.newtabpage.activity-stream.discoverystream.pocket-feed-parameters", "");
+ pref("browser.newtabpage.activity-stream.discoverystream.merino-feed-experiment", false);
+ 
+-pref("browser.newtabpage.activity-stream.telemetry.privatePing.enabled", true);
++pref("browser.newtabpage.activity-stream.telemetry.privatePing.enabled", false);
+ 
+ // This preference isn't read anymore, but kept around until we eventually end
+ // the rollout that's been setting it. Then we can remove the default here, and
+@@ -2783,7 +2783,7 @@ pref("browser.send_to_device_locales", "de,en-GB,en-US,es-AR,es-CL,es-ES,es-MX,f
+ pref("browser.vpn_promo.disallowed_regions", "ae,by,cn,cu,iq,ir,kp,om,ru,sd,sy,tm,tr");
+ 
+ // Default to enabling VPN promo messages to be shown when specified and allowed
 -pref("browser.vpn_promo.enabled", true);
-+pref("extensions.pocket.enabled", false);
-+pref("browser.newtabpage.activity-stream.showSponsored", false);
-+pref("browser.newtabpage.activity-stream.showSponsoredTopSites", false);
-+pref("browser.urlbar.suggest.quicksuggest.sponsored", false);
 +pref("browser.vpn_promo.enabled", false);
--- 
-2.47.3
+ // Only show vpn card to certain regions. Comma separated string of two letter ISO 3166-1 country codes.
+ // The most recent list of supported countries can be found at https://support.mozilla.org/en-US/kb/mozilla-vpn-countries-available-subscribe
+ // The full lists of supported country codes can also be found at https://github.com/mozilla/bedrock/search?q=VPN_COUNTRY_CODES and https://github.com/mozilla/bedrock/search?q=VPN_MOBILE_SUB_COUNTRY_CODES

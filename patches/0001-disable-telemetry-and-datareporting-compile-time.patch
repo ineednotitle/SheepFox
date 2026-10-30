@@ -1,29 +1,96 @@
-From 0000000000000000000000000000000000000001 Mon Sep 17 00:00:00 2001
-From: SheepFox Maintainers <maintainers@sheepfox.project>
-Date: Fri, 30 Oct 2026 00:00:00 +0000
-Subject: [PATCH 1/4] Disable telemetry, healthreport, and Normandy endpoints by default
+From 7151b8b0fa14b399041439808f1a35e9ff5095f9 Mon Sep 17 00:00:00 2001
+From: SheepFox Maintainers <maintainers@sheepfox.dev>
+Date: Fri, 30 Oct 2026 16:33:25 +0000
+Subject: [PATCH] Disable telemetry, data reporting and Normandy at build time
 
+These are compiled-in default values (all.js and firefox.js are packaged into
+omni.ja at build time), so a SheepFox build ships with every upload path closed
+before a profile is ever created:
+
+  * toolkit.telemetry.unified / .server  -> no unified telemetry pipeline
+  * datareporting.policy.dataSubmissionEnabled -> no data policy submission
+  * datareporting.healthreport.uploadEnabled / usage.uploadEnabled -> no health
+    report or usage pings
+  * app.normandy.* / app.shield.optoutstudies.enabled -> no remote studies
+
+The mozconfig additionally clears MOZ_TELEMETRY_REPORTING / MOZ_DATA_REPORTING so
+the reporting code paths are not even compiled in. Runtime lockPref() entries in
+config/modules/02-shieldfox.js cover stock-Firefox drop-in installs.
 ---
- browser/app/profile/firefox.js | 12 ++++++------
- 1 file changed, 6 insertions(+), 6 deletions(-)
+ browser/app/profile/firefox.js |  6 +++---
+ modules/libpref/init/all.js    | 12 ++++++------
+ 2 files changed, 9 insertions(+), 9 deletions(-)
 
 diff --git a/browser/app/profile/firefox.js b/browser/app/profile/firefox.js
-index 4a81b21..9c30e14 100644
+index 0f4b291..02205ee 100644
 --- a/browser/app/profile/firefox.js
 +++ b/browser/app/profile/firefox.js
-@@ -2140,7 +2140,7 @@
- // Telemetry & Data Submission Defaults
--pref("datareporting.policy.dataSubmissionEnabled", true);
--pref("datareporting.healthreport.uploadEnabled", true);
--pref("toolkit.telemetry.enabled", true);
--pref("toolkit.telemetry.unified", true);
--pref("app.shield.optoutstudies.enabled", true);
+@@ -3088,9 +3088,9 @@ pref("doh-rollout.clearModeOnShutdown", false);
+ pref("network.trr_ui.fallback_was_checked", true);
+ 
+ // Normandy client preferences
+-pref("app.normandy.api_url", "https://normandy.cdn.mozilla.net/api/v1");
++pref("app.normandy.api_url", "");
+ pref("app.normandy.dev_mode", false);
 -pref("app.normandy.enabled", true);
-+pref("datareporting.policy.dataSubmissionEnabled", false);
-+pref("datareporting.healthreport.uploadEnabled", false);
-+pref("toolkit.telemetry.enabled", false);
-+pref("toolkit.telemetry.unified", false);
-+pref("app.shield.optoutstudies.enabled", false);
 +pref("app.normandy.enabled", false);
--- 
-2.47.3
+ pref("app.normandy.first_run", true);
+ pref("app.normandy.logging.level", 50); // Warn
+ pref("app.normandy.run_interval_seconds", 21600); // 6 hours
+@@ -3098,7 +3098,7 @@ pref("app.normandy.shieldLearnMoreUrl", "https://support.mozilla.org/1/firefox/%
+ pref("app.normandy.last_seen_buildid", "");
+ pref("app.normandy.onsync_skew_sec", 600);
+ #ifdef MOZ_DATA_REPORTING
+-  pref("app.shield.optoutstudies.enabled", true);
++  pref("app.shield.optoutstudies.enabled", false);
+ #else
+   pref("app.shield.optoutstudies.enabled", false);
+ #endif
+diff --git a/modules/libpref/init/all.js b/modules/libpref/init/all.js
+index 2675300..ff52645 100644
+--- a/modules/libpref/init/all.js
++++ b/modules/libpref/init/all.js
+@@ -518,14 +518,14 @@ pref("toolkit.tabbox.switchByScrolling", false);
+ 
+ // Telemetry settings.
+ // Server to submit telemetry pings to.
+-pref("toolkit.telemetry.server", "https://incoming.telemetry.mozilla.org");
++pref("toolkit.telemetry.server", "");
+ // Telemetry server owner. Please change if you set toolkit.telemetry.server to a different server
+ pref("toolkit.telemetry.server_owner", "Mozilla");
+ // Determines whether full SQL strings are returned when they might contain sensitive info
+ // i.e. dynamically constructed SQL strings or SQL executed by addons against addon DBs
+ pref("toolkit.telemetry.debugSlowSql", false);
+ // Whether to use the unified telemetry behavior, requires a restart.
+-pref("toolkit.telemetry.unified", true);
++pref("toolkit.telemetry.unified", false);
+ 
+ // DAP related preferences
+ pref("toolkit.telemetry.dap.logLevel", "Warn");
+@@ -3738,13 +3738,13 @@ pref("toolkit.aboutProcesses.profileDuration", 5);
+ pref("toolkit.legacyUserProfileCustomizations.stylesheets", false);
+ 
+ #ifdef MOZ_DATA_REPORTING
+-  pref("datareporting.policy.dataSubmissionEnabled", true);
++  pref("datareporting.policy.dataSubmissionEnabled", false);
+   pref("datareporting.policy.dataSubmissionPolicyNotifiedTime", "0");
+   pref("datareporting.policy.dataSubmissionPolicyAcceptedVersion", 0);
+   pref("datareporting.policy.currentPolicyVersion", 2);
+   pref("datareporting.policy.minimumPolicyVersion", 1);
+   pref("datareporting.policy.minimumPolicyVersion.channel-beta", 2);
+-  pref("datareporting.policy.firstRunURL", "https://www.mozilla.org/privacy/firefox/");
++  pref("datareporting.policy.firstRunURL", "");
+   pref("datareporting.policy.dataSubmissionPolicyBypassNotification", false);
+ #endif
+ 
+@@ -3754,8 +3754,8 @@ pref("toolkit.legacyUserProfileCustomizations.stylesheets", false);
+ 
+     // Health Report is enabled by default on all channels.
+     // Do note that the toggle on Fenix and Focus does NOT reflect to this pref.
+-    pref("datareporting.healthreport.uploadEnabled", true);
+-    pref("datareporting.usage.uploadEnabled", true);
++    pref("datareporting.healthreport.uploadEnabled", false);
++    pref("datareporting.usage.uploadEnabled", false);
+   #endif
+ #endif
+ 

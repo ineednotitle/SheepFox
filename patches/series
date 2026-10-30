@@ -1,5 +1,12 @@
-# SheepFox Upstream Gecko Patch Series
-# Applied in order by `build/scripts/apply-patches.sh`
+# SheepFox upstream Gecko patch series
+#
+# Base: Firefox 159.0 (FIREFOX_159_0_RELEASE) — see mozbuild/firefox-version.json
+# Format: git-format patches, apply with `git apply -p1` (or `patch -p1`)
+# Order matters: 0001 applies first and each later patch builds on the previous.
+#
+# Applied by: mozbuild/scripts/apply-patches.sh
+# Verified: every patch in this series applies cleanly to the pinned tag.
+
 0001-disable-telemetry-and-datareporting-compile-time.patch
 0002-remove-pocket-and-sponsored-newtab-endpoints.patch
 0003-disable-private-attribution-and-ml-runtime-by-default.patch

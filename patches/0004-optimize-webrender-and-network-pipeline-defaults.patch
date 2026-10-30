@@ -1,25 +1,54 @@
-From 0000000000000000000000000000000000000004 Mon Sep 17 00:00:00 2001
-From: SheepFox Maintainers <maintainers@sheepfox.project>
-Date: Fri, 30 Oct 2026 00:00:00 +0000
-Subject: [PATCH 4/4] Tune WebRender shader precache and Skia glyph cache static defaults
+From a57c887612c8463de8108337618c2555fa851fdb Mon Sep 17 00:00:00 2001
+From: SheepFox Maintainers <maintainers@sheepfox.dev>
+Date: Fri, 30 Oct 2026 16:33:25 +0000
+Subject: [PATCH] Optimise WebRender and canvas defaults for speed
 
+Bake the three highest-impact rendering defaults into the binary:
+
+  * gfx.webrender.precache-shaders=true  pre-compiles shader programs at startup
+    instead of on the first scroll/animation, removing first-frame hitching.
+  * gfx.content.skia-font-cache-size=20   (from 5 MB) keeps glyph rasters hot for
+    text-heavy pages.
+  * gfx.canvas.accelerated.cache-size=512 (from 256 MB) gives hardware-accelerated
+    Canvas surfaces room to stay resident.
+
+Deliberately NOT changed here: gfx.webrender.all and layers.gpu-process.enabled.
+Firefox decides those per GPU/driver at runtime, and forcing them on unsupported
+hardware is the classic source of GPU-process crashes. SheepFox sets
+gfx.webrender.all in config/modules/01-speedfox.js where a user can revert it,
+and never disables layers.gpu-process.enabled, so GPU crashes stay isolated.
 ---
- modules/libpref/init/StaticPrefList.yaml | 4 ++--
- 1 file changed, 2 insertions(+), 2 deletions(-)
+ modules/libpref/init/StaticPrefList.yaml | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
 
 diff --git a/modules/libpref/init/StaticPrefList.yaml b/modules/libpref/init/StaticPrefList.yaml
-index 6e04f18..c421a90 100644
+index 80be46d..ae03320 100644
 --- a/modules/libpref/init/StaticPrefList.yaml
 +++ b/modules/libpref/init/StaticPrefList.yaml
-@@ -6420,7 +6420,7 @@
+@@ -7425,7 +7425,7 @@
+ 
+ - name: gfx.canvas.accelerated.cache-size
+   type: RelaxedAtomicUint32
+-  value: 256
++  value: 512
+   mirror: always
+ 
+ - name: gfx.canvas.accelerated.reserve-empty-cache
+@@ -7780,7 +7780,7 @@
+ # Size in megabytes
+ - name: gfx.content.skia-font-cache-size
+   type: int32_t
+-  value: 5
++  value: 20
+   mirror: once
+ 
+ - name: gfx.device-reset.limit
+@@ -8730,7 +8730,7 @@
+ 
  - name: gfx.webrender.precache-shaders
    type: bool
 -  value: false
 +  value: true
    mirror: once
- - name: gfx.content.skia-font-cache-size
-   type: int32_t
--  value: 5
-+  value: 20
--- 
-2.47.3
+ 
+ # When gl debug message is a high severity message, forwward it to gfx critical

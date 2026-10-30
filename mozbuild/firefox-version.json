@@ -1,0 +1,22 @@
+{
+  "product": "firefox",
+  "channel": "release",
+  "version": "159.0",
+  "tag": "FIREFOX_159_0_RELEASE",
+  "esr_version": "153.0",
+  "esr_tag": "FIREFOX_153_0esr_RELEASE",
+  "source_archive_name": "firefox-{version}.source.tar.xz",
+  "source_root": "firefox-{version}",
+  "source_url_template": "https://archive.mozilla.org/pub/firefox/releases/{version}/source/firefox-{version}.source.tar.xz",
+  "sha512sums_url_template": "https://archive.mozilla.org/pub/firefox/releases/{version}/SHA512SUMS",
+  "sha512sums_signature_url_template": "https://archive.mozilla.org/pub/firefox/releases/{version}/SHA512SUMS.asc",
+  "source_sha512": null,
+  "min_free_disk_gb": 40,
+  "notes": [
+    "The Firefox 159.0 patch series in patches/ was generated against this exact tag and verified with `git apply --check`.",
+    "source_sha512 is intentionally null: fetch-source.sh downloads Mozilla's signed SHA512SUMS for the pinned version and verifies the tarball against it, so the hash always matches the archive actually served (mirrors rotate old builds).",
+    "Set SHEEPFOX_EXPECTED_SHA512 to pin a literal digest in air-gapped or mirrored builds.",
+    "Set SHEEPFOX_MIRROR to point at an internal mirror that keeps the same /releases/<version>/... layout.",
+    "When Mozilla ships a security point release, bump version + tag together and re-verify the patch series with `make patch-source`."
+  ]
+}

@@ -1,25 +1,52 @@
-From 0000000000000000000000000000000000000003 Mon Sep 17 00:00:00 2001
-From: SheepFox Maintainers <maintainers@sheepfox.project>
-Date: Fri, 30 Oct 2026 00:00:00 +0000
-Subject: [PATCH 3/4] Disable Privacy-Preserving Attribution (PPA) and ML runtime by default
+From a743717f844b4827b4f739c5b033d9385bd70deb Mon Sep 17 00:00:00 2001
+From: SheepFox Maintainers <maintainers@sheepfox.dev>
+Date: Fri, 30 Oct 2026 16:33:25 +0000
+Subject: [PATCH] Disable the ML runtime and Private Attribution defaults
 
+* browser.ml.enable=false stops the inference engine (and therefore the model
+    hub downloads, link-preview key points, chat and smart-window workers) from
+    starting, which removes a background process and its RAM/CPU/battery cost.
+  * extensions.ml.enabled=false disables the WebExtensions trial ML API, and the
+    local model management UI is hidden.
+  * browser.ml.modelHubRootUrl is emptied so no model is ever fetched.
+
+Privacy-Preserving Attribution (dom.private-attribution.submission.enabled) no
+longer exists in Firefox 159: upstream removed the PPA client. SheepFox keeps
+the pref pinned to false in config/modules/02-shieldfox.js so that drop-in
+installs on older Firefox releases (where PPA was still present) remain
+protected, and so a future reintroduction stays off.
 ---
- modules/libpref/init/StaticPrefList.yaml | 4 ++--
- 1 file changed, 2 insertions(+), 2 deletions(-)
+ modules/libpref/init/all.js | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
 
-diff --git a/modules/libpref/init/StaticPrefList.yaml b/modules/libpref/init/StaticPrefList.yaml
-index 11b82a4..6e04f18 100644
---- a/modules/libpref/init/StaticPrefList.yaml
-+++ b/modules/libpref/init/StaticPrefList.yaml
-@@ -3910,7 +3910,7 @@
- - name: dom.private-attribution.submission.enabled
-   type: bool
--  value: true
-+  value: false
-   mirror: always
- - name: browser.ml.enable
-   type: bool
--  value: true
-+  value: false
--- 
-2.47.3
+diff --git a/modules/libpref/init/all.js b/modules/libpref/init/all.js
+index ff52645..c310919 100644
+--- a/modules/libpref/init/all.js
++++ b/modules/libpref/init/all.js
+@@ -1775,10 +1775,10 @@ pref("extensions.browser_style_mv3.supported", false);
+ pref("extensions.browser_style_mv3.same_as_mv2", false);
+ 
+ // Experimental Inference API
+-pref("extensions.ml.enabled", true);
++pref("extensions.ml.enabled", false);
+ 
+ // Local model management page enabled
+-pref("extensions.htmlaboutaddons.local_model_management", true);
++pref("extensions.htmlaboutaddons.local_model_management", false);
+ 
+ // Middle-mouse handling
+ pref("middlemouse.paste", false);
+@@ -3646,11 +3646,11 @@ pref("browser.ai.control.smartWindow", "default");
+ pref("browser.ai.control.speechRecognition", "default");
+ 
+ // Enable the experimental machine learning inference engine.
+-pref("browser.ml.enable", true);
++pref("browser.ml.enable", false);
+ // Set to "All" to see all logs, which are useful for debugging.
+ pref("browser.ml.logLevel", "Error");
+ // Model hub root URL used to download models.
+-pref("browser.ml.modelHubRootUrl", "https://model-hub.mozilla.org/");
++pref("browser.ml.modelHubRootUrl", "");
+ // Model URL template
+ pref("browser.ml.modelHubUrlTemplate", "{model}/{revision}");
+ // Maximum disk size for ML model cache (in GiB)

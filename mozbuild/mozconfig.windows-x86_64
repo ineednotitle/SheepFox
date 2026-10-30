@@ -1,0 +1,28 @@
+# ============================================================================
+# (SheepFox) Firefox — Windows x86_64 release mozconfig (clang-cl + LLD)
+# Build from a MozillaBuild shell:
+#   export MOZCONFIG=mozbuild/mozconfig.windows-x86_64
+# ============================================================================
+. "$topsrcdir/../mozbuild/mozconfig.common"
+
+# --- x86-64-v3 (AVX2 / BMI2 / FMA) code generation --------------------------
+export CFLAGS="-march=x86-64-v3 -O3"
+export CXXFLAGS="-march=x86-64-v3 -O3"
+export RUSTFLAGS="-C target-cpu=x86-64-v3"
+
+# --- Linker: LLD ------------------------------------------------------------
+ac_add_options --enable-linker=lld
+
+# --- Cross-language LTO -----------------------------------------------------
+ac_add_options --enable-lto=cross
+
+# --- Optional two-stage PGO (same contract as the Linux mozconfigs) ---------
+if [ "${SHEEPFOX_PGO:-0}" = "1" ]; then
+  export MOZ_PGO=1
+  if [ -n "${SHEEPFOX_PGO_PROFILE:-}" ]; then
+    ac_add_options --enable-profile-use=cross
+    ac_add_options --with-pgo-profile-path=${SHEEPFOX_PGO_PROFILE}
+  else
+    ac_add_options --enable-profile-generate=cross
+  fi
+fi

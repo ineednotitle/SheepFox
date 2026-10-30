@@ -1,0 +1,33 @@
+# ============================================================================
+# (SheepFox) Firefox — shared mozconfig for every target
+# Consumed by mozbuild/scripts/build-browser.sh via the MOZCONFIG variable.
+#
+# Every `ac_add_options` below is a real Firefox 159.0 configure switch
+# (verified against build/moz.configure/*.configure and toolkit/moz.configure);
+# an unknown switch aborts ./mach configure with "Unknown option: ...".
+# ============================================================================
+
+# --- Application & branding -------------------------------------------------
+ac_add_options --enable-application=browser
+# branding/sheepfox is injected into the tree by mozbuild/scripts/apply-patches.sh
+ac_add_options --with-branding=browser/branding/sheepfox
+
+# --- Optimised, hardened release build --------------------------------------
+ac_add_options --enable-release
+ac_add_options --enable-hardening
+ac_add_options --enable-optimize
+ac_add_options --enable-rust-simd
+ac_add_options --disable-debug
+ac_add_options --disable-tests
+
+# --- Strip every reporting / background component we do not ship ------------
+ac_add_options --disable-crashreporter
+ac_add_options --disable-updater
+ac_add_options --disable-default-browser-agent
+
+# Telemetry, health report, data reporting and crash upload are removed at
+# compile time, not just at runtime: these defines gate the actual code paths
+# in toolkit/components/telemetry and toolkit/components/reporting.
+export MOZ_TELEMETRY_REPORTING=0
+export MOZ_DATA_REPORTING=0
+export MOZ_SERVICES_HEALTHREPORT=0
