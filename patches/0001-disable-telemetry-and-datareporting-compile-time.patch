@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000001 Mon Sep 17 00:00:00 2001
+From: SheepFox Maintainers <maintainers@sheepfox.project>
+Date: Fri, 30 Oct 2026 00:00:00 +0000
+Subject: [PATCH 1/4] Disable telemetry, healthreport, and Normandy endpoints by default
+
+---
+ browser/app/profile/firefox.js | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/browser/app/profile/firefox.js b/browser/app/profile/firefox.js
+index 4a81b21..9c30e14 100644
+--- a/browser/app/profile/firefox.js
++++ b/browser/app/profile/firefox.js
+@@ -2140,7 +2140,7 @@
+ // Telemetry & Data Submission Defaults
+-pref("datareporting.policy.dataSubmissionEnabled", true);
+-pref("datareporting.healthreport.uploadEnabled", true);
+-pref("toolkit.telemetry.enabled", true);
+-pref("toolkit.telemetry.unified", true);
+-pref("app.shield.optoutstudies.enabled", true);
+-pref("app.normandy.enabled", true);
++pref("datareporting.policy.dataSubmissionEnabled", false);
++pref("datareporting.healthreport.uploadEnabled", false);
++pref("toolkit.telemetry.enabled", false);
++pref("toolkit.telemetry.unified", false);
++pref("app.shield.optoutstudies.enabled", false);
++pref("app.normandy.enabled", false);
+-- 
+2.47.3

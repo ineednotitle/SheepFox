@@ -1,0 +1,10 @@
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
+
+<!ENTITY  brandShorterName      "SheepFox">
+<!ENTITY  brandShortName        "SheepFox">
+<!ENTITY  brandFullName         "(SheepFox) Firefox">
+<!ENTITY  brandProductName      "SheepFox">
+<!ENTITY  vendorShortName       "SheepFox Project">
+<!ENTITY  trademarkInfo.part1   "SheepFox is released under the Mozilla Public License 2.0.">

@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="(SheepFox) Firefox Logo">
+  <defs>
+    <linearGradient id="shieldBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0F172A"/>
+      <stop offset="55%" stop-color="#1E1B4B"/>
+      <stop offset="100%" stop-color="#312E81"/>
+    </linearGradient>
+    <linearGradient id="foxFlame" x1="15%" y1="10%" x2="85%" y2="90%">
+      <stop offset="0%" stop-color="#FDE047"/>
+      <stop offset="45%" stop-color="#F97316"/>
+      <stop offset="100%" stop-color="#E11D48"/>
+    </linearGradient>
+    <linearGradient id="woolFrost" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#CBD5E1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Privacy Shield Base (Brave/LibreFox Armored Crest) -->
+  <path d="M128 16 L224 52 V124 C224 182 182 224 128 242 C74 224 32 182 32 124 V52 Z"
+        fill="url(#shieldBg)" stroke="#6366F1" stroke-width="5" stroke-linejoin="round"/>
+
+  <!-- Inner Speed Ring -->
+  <circle cx="128" cy="126" r="68" fill="none" stroke="#4338CA" stroke-width="2.5" stroke-dasharray="10 6" opacity="0.65"/>
+
+  <!-- Geometric Fox Ears & Flame Tail Arc -->
+  <path d="M74 98 L62 54 L102 78 Q128 68 154 78 L194 54 L182 98
+           C196 122 190 158 164 178 C142 195 114 195 92 178 C66 158 60 122 74 98 Z"
+        fill="url(#foxFlame)"/>
+
+  <!-- Stylized Sheep Wool Crown / Cheek Crest -->
+  <path d="M90 106
+           A16 16 0 0 1 114 92
+           A20 20 0 0 1 142 92
+           A16 16 0 0 1 166 106
+           Q174 124 158 138
+           L128 168 L98 138
+           Q82 124 90 106 Z"
+        fill="url(#woolFrost)"/>
+
+  <!-- Sleek Fox Snout & Eyes -->
+  <polygon points="116,154 140,154 128,170" fill="#0F172A"/>
+  <path d="M102 124 L116 130 L104 134 Z" fill="#0F172A"/>
+  <path d="M154 124 L140 130 L152 134 Z" fill="#0F172A"/>
+</svg>

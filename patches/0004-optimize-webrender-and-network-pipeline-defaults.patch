@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000004 Mon Sep 17 00:00:00 2001
+From: SheepFox Maintainers <maintainers@sheepfox.project>
+Date: Fri, 30 Oct 2026 00:00:00 +0000
+Subject: [PATCH 4/4] Tune WebRender shader precache and Skia glyph cache static defaults
+
+---
+ modules/libpref/init/StaticPrefList.yaml | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/modules/libpref/init/StaticPrefList.yaml b/modules/libpref/init/StaticPrefList.yaml
+index 6e04f18..c421a90 100644
+--- a/modules/libpref/init/StaticPrefList.yaml
++++ b/modules/libpref/init/StaticPrefList.yaml
+@@ -6420,7 +6420,7 @@
+ - name: gfx.webrender.precache-shaders
+   type: bool
+-  value: false
++  value: true
+   mirror: once
+ - name: gfx.content.skia-font-cache-size
+   type: int32_t
+-  value: 5
++  value: 20
+-- 
+2.47.3

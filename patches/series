@@ -1,0 +1,6 @@
+# SheepFox Upstream Gecko Patch Series
+# Applied in order by `build/scripts/apply-patches.sh`
+0001-disable-telemetry-and-datareporting-compile-time.patch
+0002-remove-pocket-and-sponsored-newtab-endpoints.patch
+0003-disable-private-attribution-and-ml-runtime-by-default.patch
+0004-optimize-webrender-and-network-pipeline-defaults.patch
