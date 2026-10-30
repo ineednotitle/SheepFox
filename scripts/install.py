@@ -57,6 +57,10 @@ def candidate_system_firefox_dirs() -> list[Path]:
         Path("/usr/lib64/firefox"),
         Path("/usr/lib/firefox-esr"),
         Path("/opt/firefox"),
+        # Flatpak (system + per-user) and Snap keep the real install tree here
+        Path("/var/lib/flatpak/app/org.mozilla.firefox/current/active/files/lib/firefox"),
+        Path.home() / ".local/share/flatpak/app/org.mozilla.firefox/current/active/files/lib/firefox",
+        Path("/snap/firefox/current/usr/lib/firefox"),
     ]
 
 
@@ -139,6 +143,13 @@ def main() -> int:
     profile_dir = args.profile.resolve() if args.profile else detect_default_profile()
     firefox_dir = args.firefox_dir.resolve() if args.firefox_dir else detect_system_firefox_dir()
 
+    if args.profile and not profile_dir.is_dir():
+        print(f"[ERROR] Profile directory does not exist: {profile_dir}", file=sys.stderr)
+        return 1
+    if args.firefox_dir and not firefox_dir.is_dir():
+        print(f"[ERROR] Firefox directory does not exist: {firefox_dir}", file=sys.stderr)
+        return 1
+
     print("=== (SheepFox) Firefox Installer ===")
     print(f"Detected Profile : {profile_dir if profile_dir else 'Not found (pass --profile <dir>)'}")
     print(f"Detected System  : {firefox_dir if firefox_dir else 'Not found (pass --firefox-dir <dir>)'}")
@@ -160,6 +171,10 @@ def main() -> int:
                         target.unlink()
                         print(f"  [REMOVE] Removed {target}")
         return 0
+
+    if profile_dir and not profile_dir.is_dir() and not args.dry_run:
+        print(f"[ERROR] Profile directory does not exist: {profile_dir}", file=sys.stderr)
+        return 1
 
     if not profile_dir and not args.system:
         if args.dry_run:
