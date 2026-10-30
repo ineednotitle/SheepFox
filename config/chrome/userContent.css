@@ -1,0 +1,55 @@
+/* ============================================================================
+   (SheepFox) Firefox — userContent.css
+   Pairs with config/chrome/userChrome.css: the floating pill sits at 24vh on a
+   blank tab, so the New Tab page gets cleared out and pushed down to make room
+   — the Zen / Arc "search on an empty canvas" layout.
+
+   Installed to: <profile>/chrome/userContent.css
+   Revert:       delete this file, or run the installer with --no-ui.
+   ============================================================================ */
+
+@-moz-document url("about:newtab"), url("about:home") {
+  /* 1. Remove the Firefox wordmark so the floating search owns the top area. */
+  .logo-and-wordmark,
+  .search-wrapper,
+  .search-inner-wrapper,
+  .wordmark {
+    display: none !important;
+  }
+
+  /* 2. Push the shortcut tiles below the floating pill (pill ends ~24vh+56px). */
+  .outer-wrapper {
+    padding-top: 34vh !important;
+  }
+
+  /* 3. Tighter, rounder shortcut grid — closer to an Arc "cards" row. */
+  .top-sites-list,
+  .top-sites {
+    gap: 14px !important;
+  }
+
+  .top-site-outer .tile {
+    border-radius: 18px !important;
+    transition: transform 140ms ease, box-shadow 140ms ease !important;
+  }
+
+  .top-site-outer:hover .tile {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.18) !important;
+  }
+
+  /* 4. Slightly calmer section labels. */
+  .section-title {
+    opacity: 0.72 !important;
+    letter-spacing: 0.02em !important;
+  }
+
+  /* 5. Respect the OS reduced-motion setting: no hover lift. */
+  @media (prefers-reduced-motion: reduce) {
+    .top-site-outer .tile,
+    .top-site-outer:hover .tile {
+      transition: none !important;
+      transform: none !important;
+    }
+  }
+}

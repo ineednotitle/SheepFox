@@ -253,6 +253,65 @@ class TestPreferenceInvariants(unittest.TestCase):
         self.assertTrue(example.is_file())
 
 
+class TestFloatingSearchUI(unittest.TestCase):
+    """The Zen/Arc-style floating new-tab search pill."""
+
+    CHROME = REPO_ROOT / "config" / "chrome" / "userChrome.css"
+    CONTENT = REPO_ROOT / "config" / "chrome" / "userContent.css"
+
+    def test_assets_exist_and_are_balanced(self) -> None:
+        for path in (self.CHROME, self.CONTENT):
+            self.assertTrue(path.is_file(), msg=f"missing {path.name}")
+            text = read(path)
+            self.assertEqual(
+                text.count("{"), text.count("}"), msg=f"{path.name}: unbalanced braces"
+            )
+            self.assertTrue(text.lstrip().startswith("/*"), msg=f"{path.name}: needs a header")
+        self.assertIn("@namespace", read(self.CHROME), msg="userChrome.css needs the XUL namespace")
+        self.assertIn("@-moz-document", read(self.CONTENT), msg="userContent.css needs a scope")
+
+    def test_style_legacy_sheets_is_enabled(self) -> None:
+        # userChrome.css is only honoured when this pref is true at startup.
+        user_js = parse_prefs(read(USER_JS), ("user_pref",))
+        self.assertIn("toolkit.legacyUserProfileCustomizations.stylesheets", user_js)
+        self.assertIs(user_js["toolkit.legacyUserProfileCustomizations.stylesheets"][0], True)
+
+    def test_pill_is_scoped_to_blank_tabs(self) -> None:
+        css = read(self.CHROME)
+        selector = '#urlbar[pageproxystate="invalid"]:not([focused])'
+        self.assertIn(selector, css, msg="pill must only match a blank tab")
+        self.assertIn("position: fixed", css)
+        self.assertIn("translateX(-50%)", css, msg="pill must be horizontally centred")
+        self.assertIn("border-radius: var(--sheepfox-pill-radius)", css)
+        self.assertIn("box-shadow", css)
+        self.assertIn("clamp(", css, msg="pill width must be responsive")
+        # Never hide or disable the address bar itself.
+        self.assertNotRegex(css, r"#urlbar\s*\{[^}]*display:\s*none")
+
+    def test_dark_mode_and_reduced_motion(self) -> None:
+        css = read(self.CHROME)
+        self.assertIn("prefers-color-scheme: light", css)
+        self.assertIn("prefers-color-scheme: dark", css)
+        self.assertIn("prefers-reduced-motion: reduce", css)
+
+    def test_new_tab_page_makes_room_for_the_pill(self) -> None:
+        css = read(self.CONTENT)
+        self.assertIn('@-moz-document url("about:newtab"), url("about:home")', css)
+        self.assertIn(".logo-and-wordmark", css, msg="wordmark must be cleared")
+        self.assertIn("padding-top", css, msg="shortcuts must be pushed below the pill")
+
+    def test_installers_ship_the_ui(self) -> None:
+        installer = read(REPO_ROOT / "scripts" / "install.py")
+        self.assertIn('UI_FILES = ("userChrome.css", "userContent.css")', installer)
+        self.assertIn('"chrome"', installer)
+        self.assertIn("--no-ui", installer)
+
+        ps1 = (REPO_ROOT / "scripts" / "install-windows.ps1").read_text(encoding="utf-8")
+        self.assertIn("$NoUI", ps1)
+        self.assertIn("userChrome.css", ps1)
+        self.assertIn('Join-Path $ProfilePath "chrome\\$name"', ps1)
+
+
 class TestPolicies(unittest.TestCase):
     """SheepShields must provision uBlock Origin without breaking the browser."""
 
@@ -533,6 +592,12 @@ class TestInstallers(unittest.TestCase):
             self.assertEqual(len(backups), 1, "existing user.js must be backed up exactly once")
             self.assertIn("previous config", backups[0].read_text(encoding="utf-8"))
 
+            ui = profile / "chrome" / "userChrome.css"
+            self.assertTrue(ui.is_file(), msg="floating search UI was not installed")
+            self.assertIn('#urlbar[pageproxystate="invalid"]', ui.read_text(encoding="utf-8"))
+            self.assertTrue((profile / "chrome" / "userContent.css").is_file())
+            self.assertFalse(ui.read_bytes().startswith(b"\xef\xbb\xbf"))
+
             cfg = (firefox / "sheepfox.cfg").read_text(encoding="utf-8")
             self.assertTrue(cfg.startswith("//"))
             self.assertIn("lockPref(", cfg)
@@ -562,6 +627,8 @@ class TestInstallers(unittest.TestCase):
             )
             self.assertEqual(uninstall.returncode, 0, msg=uninstall.stderr or uninstall.stdout)
             self.assertFalse((profile / "user.js").exists())
+            self.assertFalse((profile / "chrome" / "userChrome.css").exists())
+            self.assertFalse((profile / "chrome" / "userContent.css").exists())
             self.assertFalse((firefox / "sheepfox.cfg").exists())
             self.assertFalse((firefox / "distribution" / "policies.json").exists())
             self.assertEqual(len(list(profile.glob("user.js.sheepfox-backup-*"))), 1)
@@ -592,8 +659,25 @@ class TestInstallers(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
             self.assertFalse((profile / "user.js").exists())
+            self.assertFalse((profile / "chrome" / "userChrome.css").exists())
+            self.assertFalse((profile / "chrome" / "userContent.css").exists())
             self.assertFalse((firefox / "sheepfox.cfg").exists())
             self.assertEqual(list(profile.iterdir()), [])
+
+    def test_no_ui_flag_skips_chrome_css(self) -> None:
+        installer = REPO_ROOT / "scripts" / "install.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "profile"
+            profile.mkdir()
+            result = subprocess.run(
+                [sys.executable, str(installer), "--profile", str(profile), "--no-ui"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
+            self.assertTrue((profile / "user.js").is_file())
+            self.assertFalse((profile / "chrome").exists())
 
     def test_unix_wrapper_delegates_to_python(self) -> None:
         wrapper = read(REPO_ROOT / "scripts" / "install-unix.sh")

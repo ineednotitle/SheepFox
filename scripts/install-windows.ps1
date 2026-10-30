@@ -21,6 +21,10 @@
 .PARAMETER Uninstall
   Remove the files SheepFox installed. Timestamped backups are left untouched.
 
+.PARAMETER NoUI
+  Skip the chrome\userChrome.css + userContent.css floating-search theme, so
+  Firefox keeps its stock toolbar and New Tab layout.
+
 .PARAMETER DryRun
   Print every action without touching the disk.
 
@@ -46,6 +50,7 @@ param(
     [switch]$Strict,
     [switch]$Uninstall,
     [switch]$DryRun,
+    [switch]$NoUI,
     [string]$ProfilePath = "",
     [string]$FirefoxDir = "",
     # Catches stray tokens (for example a '::' comment copied from cmd.exe docs)
@@ -221,6 +226,7 @@ if ($System -and -not (Test-IsAdmin) -and -not $DryRun) {
         "-System"
     )
     if ($Strict) { $argumentList += "-Strict" }
+    if ($NoUI) { $argumentList += "-NoUI" }
     if ($Uninstall) { $argumentList += "-Uninstall" }
     if ($ProfilePath) { $argumentList += @("-ProfilePath", "`"$ProfilePath`"") }
     if ($FirefoxDir) { $argumentList += @("-FirefoxDir", "`"$FirefoxDir`"") }
@@ -244,6 +250,9 @@ $UserOverridesSrc = Join-Path $RepoRoot "config\overrides\user-overrides.js"
 $PoliciesSrc = Join-Path $RepoRoot "config\distribution\policies.json"
 $AutoCfgSrc = Join-Path $RepoRoot "config\autoconfig\sheepfox.cfg"
 $LocalSettingsSrc = Join-Path $RepoRoot "config\autoconfig\defaults\pref\local-settings.js"
+$ChromeSrcDir = Join-Path $RepoRoot "config\chrome"
+# Profile-level CSS: the floating Zen/Arc-style new-tab search pill.
+$UiFiles = @("userChrome.css", "userContent.css")
 
 if (-not (Test-Path $UserJsSrc)) {
     Write-SheepFox "[error] config\user.js is missing. Run 'python mozbuild\scripts\build-configs.py' first." "Red"
@@ -269,7 +278,10 @@ Write-Host ""
 # --------------------------------------------------------------------------
 if ($Uninstall) {
     $targets = @()
-    if ($ProfilePath) { $targets += (Join-Path $ProfilePath "user.js") }
+    if ($ProfilePath) {
+        $targets += (Join-Path $ProfilePath "user.js")
+        foreach ($name in $UiFiles) { $targets += (Join-Path $ProfilePath "chrome\$name") }
+    }
     if ($System -and $FirefoxDir) {
         $targets += @(
             (Join-Path $FirefoxDir "sheepfox.cfg"),
@@ -318,6 +330,31 @@ if ($ProfilePath -and (Test-Path $ProfilePath)) {
     }
 } elseif (-not $System) {
     Write-SheepFox "[warn] No Firefox profile found. Launch Firefox once, or pass -ProfilePath." "Yellow"
+}
+
+# --------------------------------------------------------------------------
+# Install: floating new-tab search (userChrome.css / userContent.css)
+# --------------------------------------------------------------------------
+if ($ProfilePath -and (Test-Path $ProfilePath)) {
+    if ($NoUI) {
+        Write-SheepFox "  [skip] UI theme skipped (-NoUI)" "DarkYellow"
+    } else {
+        foreach ($name in $UiFiles) {
+            $source = Join-Path $ChromeSrcDir $name
+            if (-not (Test-Path $source)) {
+                Write-SheepFox "  [warn] missing UI asset: $source" "Yellow"
+                continue
+            }
+            $target = Join-Path $ProfilePath "chrome\$name"
+            if ($DryRun) {
+                Write-SheepFox "  [dry-run] would write $target"
+                continue
+            }
+            Backup-ExistingFile -Path $target
+            Write-Utf8NoBom -Path $target -Content ([System.IO.File]::ReadAllText($source))
+            Write-SheepFox "  [ok] installed floating search UI -> $target" "Green"
+        }
+    }
 }
 
 # --------------------------------------------------------------------------

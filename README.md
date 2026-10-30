@@ -73,6 +73,9 @@ SheepFox/
 │   ├── autoconfig/
 │   │   ├── defaults/pref/local-settings.js   # general.config.* bootstrap
 │   │   └── sheepfox.cfg                      # generated AutoConfig (line 1 is a comment)
+│   ├── chrome/                      # UI theme: floating Zen/Arc-style search pill
+│   │   ├── userChrome.css           #   centred pill on blank tabs (toolbar untouched)
+│   │   └── userContent.css          #   clears the New Tab wordmark, lifts the shortcuts
 │   ├── distribution/policies.json   # SheepShields: telemetry off + uBlock Origin on
 │   └── overrides/                   # user-overrides.example.js, strict-paranoia.override.js
 │
@@ -167,6 +170,46 @@ python scripts\install.py --dry-run
 python scripts\install.py --strict
 python scripts\install.py --system --uninstall
 ```
+
+### UI: floating new-tab search (Zen / Arc style)
+
+Open a new tab (`Ctrl+T`) and the address + search bar detaches from the toolbar and floats,
+centred, as a rounded glass pill; the New Tab wordmark is cleared and your shortcuts sit below
+it, like Arc's command bar or Zen's empty canvas. The moment you focus it — or load a page — it
+docks back into the stock toolbar, so the results panel, keyboard handling and every other page
+behave exactly like normal Firefox.
+
+It ships as **profile CSS**, not a patch, so it is instantly reversible:
+
+```bash
+./scripts/install-unix.sh            # installs config/chrome/*.css into <profile>/chrome/
+./scripts/install-unix.sh --no-ui    # everything except the UI theme
+```
+
+```powershell
+.\scripts\install-windows.bat
+.\scripts\install-windows.bat -NoUI
+```
+
+Why it cannot break browsing: the rules are scoped to
+`#urlbar[pageproxystate="invalid"]:not([focused])`, i.e. only a tab with no loaded page. Typing in
+the address bar of a real site, opening bookmarks, or navigating never matches. It also honours
+`prefers-color-scheme` and `prefers-reduced-motion`, and Firefox only reads these files because
+`toolkit.legacyUserProfileCustomizations.stylesheets = true` is already set in
+`config/modules/03-cleanfox.js`.
+
+Tuning or removing it:
+
+| Want | Do |
+| :--- | :--- |
+| Move the pill / resize it | edit `--sheepfox-pill-top`, `--sheepfox-pill-width` in your profile's `chrome/userChrome.css` |
+| Shrink it back to a normal bar | delete `<profile>/chrome/userChrome.css` |
+| Keep the pill, restore the New Tab logo | delete `<profile>/chrome/userContent.css` |
+| Uninstall everything | `python3 scripts/install.py --uninstall` (removes both files) |
+
+Edits survive reinstalls until you re-run the installer, which rewrites the files from
+`config/chrome/` (backing up the previous copy first). To make a UI change permanent, edit
+`config/chrome/*.css` in the repo and reinstall — the same rule as the prefs.
 
 ### Reverting
 

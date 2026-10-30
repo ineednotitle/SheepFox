@@ -3,7 +3,9 @@
 (SheepFox) Firefox — Cross-Platform Drop-In Installer & Profile Manager
 Applies SheepFox speed & privacy configurations to stock Mozilla Firefox:
   1. Per-profile `user.js` (+ optional personal or `--strict` overrides)
-  2. Optional `--system` AutoConfig (`sheepfox.cfg` + `local-settings.js`)
+  2. Per-profile UI theme: `chrome/userChrome.css` + `chrome/userContent.css`
+     (the floating Zen/Arc-style new-tab search pill; skip with --no-ui)
+  3. Optional `--system` AutoConfig (`sheepfox.cfg` + `local-settings.js`)
      and SheepShields Enterprise Policy (`distribution/policies.json` with uBlock Origin)
 """
 
@@ -25,6 +27,9 @@ CUSTOM_OVERRIDE_SRC = REPO_ROOT / "config" / "overrides" / "user-overrides.js"
 POLICIES_SRC = REPO_ROOT / "config" / "distribution" / "policies.json"
 AUTOCONFIG_CFG_SRC = REPO_ROOT / "config" / "autoconfig" / "sheepfox.cfg"
 LOCAL_SETTINGS_SRC = REPO_ROOT / "config" / "autoconfig" / "defaults" / "pref" / "local-settings.js"
+CHROME_SRC_DIR = REPO_ROOT / "config" / "chrome"
+#: Profile-level CSS: the floating new-tab search pill (Zen/Arc style)
+UI_FILES = ("userChrome.css", "userContent.css")
 
 
 def candidate_profile_roots() -> list[Path]:
@@ -138,6 +143,11 @@ def main() -> int:
     parser.add_argument("--strict", action="store_true", help="Append strict anti-fingerprinting (RFP) overrides.")
     parser.add_argument("--uninstall", action="store_true", help="Remove SheepFox files from target profile/system.")
     parser.add_argument("--dry-run", action="store_true", help="Preview installation paths without modifying disk.")
+    parser.add_argument(
+        "--no-ui",
+        action="store_true",
+        help="Skip the chrome/userChrome.css + userContent.css floating-search theme.",
+    )
     args = parser.parse_args()
 
     profile_dir = args.profile.resolve() if args.profile else detect_default_profile()
@@ -161,6 +171,15 @@ def main() -> int:
             else:
                 (profile_dir / "user.js").unlink()
                 print(f"  [REMOVE] Removed {profile_dir / 'user.js'}")
+        if profile_dir:
+            for name in UI_FILES:
+                target = profile_dir / "chrome" / name
+                if target.exists():
+                    if args.dry_run:
+                        print(f"  [DRY-RUN] Would remove {target}")
+                    else:
+                        target.unlink()
+                        print(f"  [REMOVE] Removed {target}")
         if args.system and firefox_dir:
             for rel in ["sheepfox.cfg", "defaults/pref/local-settings.js", "distribution/policies.json"]:
                 target = firefox_dir / rel
@@ -186,6 +205,18 @@ def main() -> int:
     if profile_dir:
         payload = compose_user_js(strict=args.strict)
         backup_and_write(profile_dir / "user.js", payload, dry_run=args.dry_run)
+
+        if args.no_ui:
+            print("  [SKIP]   UI theme skipped (--no-ui)")
+        else:
+            for name in UI_FILES:
+                src = CHROME_SRC_DIR / name
+                if not src.is_file():
+                    print(f"  [WARN]   Missing UI asset: {src}")
+                    continue
+                backup_and_write(
+                    profile_dir / "chrome" / name, src.read_text(encoding="utf-8"), args.dry_run
+                )
 
     if args.system:
         if not firefox_dir:
