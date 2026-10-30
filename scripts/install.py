@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import argparse
 import configparser
+import json
 import os
+import re
 import platform
 import shutil
 import sys
@@ -111,6 +113,105 @@ def detect_system_firefox_dir() -> Path | None:
     return None
 
 
+def read_firefox_version(firefox_dir: Path | None) -> str:
+    """Read Version= out of <install>/application.ini (best effort)."""
+    if not firefox_dir:
+        return "unknown"
+    ini = firefox_dir / "application.ini"
+    if not ini.is_file():
+        return "unknown"
+    for line in ini.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.startswith("Version="):
+            return line.split("=", 1)[1].strip()
+    return "unknown"
+
+
+def pref_value_from_prefs_js(profile_dir: Path, name: str) -> object | None:
+    """Return the value Firefox last saved for *name* in prefs.js, else None."""
+    prefs_js = profile_dir / "prefs.js"
+    if not prefs_js.is_file():
+        return None
+    pattern = re.compile(r'^user_pref\("' + re.escape(name) + r'",\s*(.+?)\);\s*$', re.MULTILINE)
+    match = pattern.search(prefs_js.read_text(encoding="utf-8", errors="replace"))
+    if not match:
+        return None
+    raw = match.group(1).strip()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return raw.strip('"')
+
+
+def doctor(profile_dir: Path | None, firefox_dir: Path | None) -> int:
+    """Explain whether the floating-search UI can load, and why not."""
+    print("=== (SheepFox) Firefox doctor ===")
+    version = read_firefox_version(firefox_dir)
+    if firefox_dir:
+        print(f"  install   : {firefox_dir}")
+        print(f"  version   : {version}")
+    else:
+        print("  install   : not detected (pass --firefox-dir)")
+
+    failures = 0
+
+    def report(ok: bool, label: str, detail: str = "") -> None:
+        nonlocal failures
+        if not ok:
+            failures += 1
+        mark = "OK  " if ok else "FAIL"
+        print(f"  [{mark}] {label}{(' -> ' + detail) if detail else ''}")
+
+    if not profile_dir:
+        print("  [FAIL] no Firefox profile found (launch Firefox once, or pass --profile)")
+        failures += 1
+        return 1
+
+    print(f"  profile   : {profile_dir}")
+
+    user_js = profile_dir / "user.js"
+    report(user_js.is_file(), "user.js present")
+    if user_js.is_file():
+        text = user_js.read_text(encoding="utf-8", errors="replace")
+        report(
+            'user_pref("toolkit.legacyUserProfileCustomizations.stylesheets", true);' in text,
+            "user.js enables userChrome.css",
+        )
+
+    chrome_dir = profile_dir / "chrome"
+    for name, minimum in (("userChrome.css", 2000), ("userContent.css", 400)):
+        target = chrome_dir / name
+        size = target.stat().st_size if target.is_file() else 0
+        report(target.is_file() and size >= minimum, f"chrome/{name}", f"{size} bytes")
+
+    saved = pref_value_from_prefs_js(profile_dir, "toolkit.legacyUserProfileCustomizations.stylesheets")
+    if saved is None:
+        print("  [info] prefs.js has no saved value yet; Firefox will take it from user.js on next start")
+    elif saved is True:
+        report(True, "pref saved as true")
+    else:
+        report(False, "pref saved as false", "set it to true in about:config, or reinstall")
+        print("         (a stale user.js or another hardening tool may have set it false)")
+
+    if firefox_dir:
+        for rel in ("sheepfox.cfg", "defaults/pref/local-settings.js", "distribution/policies.json"):
+            report((firefox_dir / rel).is_file(), f"system {rel}")
+
+    print()
+    if failures:
+        print(f"  {failures} problem(s) found. Fix the FAIL lines above, then restart Firefox.")
+        print("  Full reinstall:  python3 scripts/install.py [--profile DIR] [--system]")
+        return 1
+
+    print("  All checks passed. If the new-tab pill still does not appear:")
+    print("    1. Quit Firefox completely (Task Manager -> no firefox.exe) and start it again.")
+    print("    2. Append this line to your profile's chrome/userChrome.css to prove CSS is")
+    print("       loading (toolbar turns red; remove it afterwards):")
+    print("         #nav-bar { background: #cc0000 !important; }")
+    print("    3. Open about:config and confirm")
+    print("       toolkit.legacyUserProfileCustomizations.stylesheets = true")
+    return 0
+
+
 def compose_user_js(strict: bool) -> str:
     content = USER_JS_SRC.read_text(encoding="utf-8")
     if strict:
@@ -144,6 +245,11 @@ def main() -> int:
     parser.add_argument("--uninstall", action="store_true", help="Remove SheepFox files from target profile/system.")
     parser.add_argument("--dry-run", action="store_true", help="Preview installation paths without modifying disk.")
     parser.add_argument(
+        "--doctor",
+        action="store_true",
+        help="Diagnose why the floating-search UI (or the install) is not taking effect.",
+    )
+    parser.add_argument(
         "--no-ui",
         action="store_true",
         help="Skip the chrome/userChrome.css + userContent.css floating-search theme.",
@@ -163,6 +269,9 @@ def main() -> int:
     print("=== (SheepFox) Firefox Installer ===")
     print(f"Detected Profile : {profile_dir if profile_dir else 'Not found (pass --profile <dir>)'}")
     print(f"Detected System  : {firefox_dir if firefox_dir else 'Not found (pass --firefox-dir <dir>)'}")
+
+    if args.doctor:
+        return doctor(profile_dir, firefox_dir)
 
     if args.uninstall:
         if profile_dir and (profile_dir / "user.js").exists():

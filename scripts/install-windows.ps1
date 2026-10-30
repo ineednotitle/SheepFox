@@ -21,6 +21,11 @@
 .PARAMETER Uninstall
   Remove the files SheepFox installed. Timestamped backups are left untouched.
 
+.PARAMETER Doctor
+  Diagnose an existing install: report the profile in use, whether user.js and
+  chrome\userChrome.css are in the right place, and whether the stylesheet pref
+  is actually saved. Writes nothing.
+
 .PARAMETER NoUI
   Skip the chrome\userChrome.css + userContent.css floating-search theme, so
   Firefox keeps its stock toolbar and New Tab layout.
@@ -51,6 +56,7 @@ param(
     [switch]$Uninstall,
     [switch]$DryRun,
     [switch]$NoUI,
+    [switch]$Doctor,
     [string]$ProfilePath = "",
     [string]$FirefoxDir = "",
     # Catches stray tokens (for example a '::' comment copied from cmd.exe docs)
@@ -217,7 +223,7 @@ function Resolve-FirefoxDir {
 # --------------------------------------------------------------------------
 Remove-MarkOfTheWeb
 
-if ($System -and -not (Test-IsAdmin) -and -not $DryRun) {
+if ($System -and -not (Test-IsAdmin) -and -not $DryRun -and -not $Doctor) {
     Write-SheepFox "Administrator rights are required for -System; requesting elevation (UAC)..." "Yellow"
     $argumentList = @(
         "-NoProfile",
@@ -272,6 +278,88 @@ if (-not $FirefoxDir) {
 Write-SheepFox ("Profile : " + $(if ($ProfilePath) { $ProfilePath } else { "not found (pass -ProfilePath)" }))
 Write-SheepFox ("Install : " + $(if ($FirefoxDir) { $FirefoxDir } else { "not found (pass -FirefoxDir)" }))
 Write-Host ""
+
+# --------------------------------------------------------------------------
+# Doctor
+# --------------------------------------------------------------------------
+if ($Doctor) {
+    Write-SheepFox "=== (SheepFox) Firefox doctor ===" "Cyan"
+    $problems = 0
+
+    function Report-Check {
+        param([bool]$Ok, [string]$Label, [string]$Detail = "")
+        if (-not $Ok) { $script:problems++ }
+        $mark = if ($Ok) { "OK  " } else { "FAIL" }
+        $color = if ($Ok) { "Green" } else { "Red" }
+        $suffix = if ($Detail) { " -> $Detail" } else { "" }
+        Write-Host "  [$mark] $Label$suffix" -ForegroundColor $color
+    }
+
+    $version = "unknown"
+    if ($FirefoxDir -and (Test-Path (Join-Path $FirefoxDir "application.ini"))) {
+        foreach ($line in (Get-Content (Join-Path $FirefoxDir "application.ini") -ErrorAction SilentlyContinue)) {
+            if ($line -like "Version=*") { $version = ($line -split "=", 2)[1].Trim() }
+        }
+    }
+    Write-SheepFox ("  install   : " + $(if ($FirefoxDir) { "$FirefoxDir (v$version)" } else { "not detected (pass -FirefoxDir)" }))
+    Write-SheepFox ("  profile   : " + $(if ($ProfilePath) { $ProfilePath } else { "not detected (pass -ProfilePath)" }))
+
+    if (-not $ProfilePath -or -not (Test-Path $ProfilePath)) {
+        Write-SheepFox "  [FAIL] no Firefox profile found. Launch Firefox once, or pass -ProfilePath." "Red"
+        exit 1
+    }
+
+    $userJs = Join-Path $ProfilePath "user.js"
+    Report-Check (Test-Path $userJs) "user.js present"
+    if (Test-Path $userJs) {
+        $userJsText = [System.IO.File]::ReadAllText($userJs)
+        Report-Check ($userJsText -match 'toolkit\.legacyUserProfileCustomizations\.stylesheets", true') `
+            "user.js enables userChrome.css"
+    }
+
+    foreach ($pair in @(
+            @{ Name = "userChrome.css"; Min = 2000 },
+            @{ Name = "userContent.css"; Min = 400 })) {
+        $target = Join-Path $ProfilePath "chrome\$($pair.Name)"
+        $size = if (Test-Path $target) { (Get-Item $target).Length } else { 0 }
+        Report-Check (($size -ge $pair.Min)) "chrome\$($pair.Name)" "$size bytes"
+    }
+
+    $prefsJs = Join-Path $ProfilePath "prefs.js"
+    $saved = $null
+    if (Test-Path $prefsJs) {
+        $hit = Select-String -Path $prefsJs -Pattern 'user_pref\("toolkit\.legacyUserProfileCustomizations\.stylesheets",\s*(true|false)\)' -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($hit) {
+            $saved = $hit.Matches[0].Groups[1].Value -eq "true"
+        }
+    }
+    if ($null -eq $saved) {
+        Write-SheepFox "  [info] prefs.js has no saved value yet; Firefox takes it from user.js on next start" "Gray"
+    } else {
+        Report-Check $saved "pref saved in prefs.js" $(if ($saved) { "true" } else { "false - set it to true in about:config" })
+    }
+
+    if ($FirefoxDir -and (Test-Path $FirefoxDir)) {
+        foreach ($rel in @("sheepfox.cfg", "defaults\pref\local-settings.js", "distribution\policies.json")) {
+            Report-Check (Test-Path (Join-Path $FirefoxDir $rel)) "system $rel"
+        }
+    }
+
+    Write-Host ""
+    if ($problems -gt 0) {
+        Write-SheepFox "  $problems problem(s) found. Fix the FAIL lines above, then restart Firefox." "Yellow"
+        Write-SheepFox "  Full reinstall:  .\scripts\install-windows.bat -System" "Yellow"
+        exit 1
+    }
+
+    Write-SheepFox "  All checks passed. If the new-tab pill still does not appear:" "Cyan"
+    Write-SheepFox "    1. Quit Firefox completely (Task Manager: no firefox.exe), then start it."
+    Write-SheepFox "    2. Append  #nav-bar { background: #cc0000 !important; }  to"
+    Write-SheepFox "       <profile>\chrome\userChrome.css to prove CSS loads, then remove it."
+    Write-SheepFox "    3. about:config -> toolkit.legacyUserProfileCustomizations.stylesheets = true"
+    exit 0
+}
 
 # --------------------------------------------------------------------------
 # Uninstall

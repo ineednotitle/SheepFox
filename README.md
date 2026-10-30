@@ -191,9 +191,11 @@ It ships as **profile CSS**, not a patch, so it is instantly reversible:
 .\scripts\install-windows.bat -NoUI
 ```
 
-Why it cannot break browsing: the rules are scoped to
-`#urlbar[pageproxystate="invalid"]:not([focused])`, i.e. only a tab with no loaded page. Typing in
-the address bar of a real site, opening bookmarks, or navigating never matches. It also honours
+Why it cannot break browsing: the pill requires **both** `#urlbar[pageproxystate="invalid"]`
+(not showing a loaded page's address) **and** an empty field (`#urlbar-input:placeholder-shown`).
+That deliberately does *not* depend on the address bar being unfocused — Firefox autofocuses it on
+a new tab, which would otherwise hide the pill — while typing in the address bar of a real page,
+opening bookmarks, or navigating never matches. It also honours
 `prefers-color-scheme` and `prefers-reduced-motion`, and Firefox only reads these files because
 `toolkit.legacyUserProfileCustomizations.stylesheets = true` is already set in
 `config/modules/03-cleanfox.js`.
@@ -300,6 +302,38 @@ What the suite enforces:
     `--dry-run` is proven to write nothing.
 
 ---
+
+## Troubleshooting: the UI (or any change) did not apply
+
+Run the built-in doctor first — it reports the exact profile in use and whether each piece landed:
+
+```powershell
+.\scripts\install-windows.bat -Doctor
+```
+
+```bash
+python3 scripts/install.py --doctor
+```
+
+It checks `user.js`, `chrome/userChrome.css`, `chrome/userContent.css`, whether
+`toolkit.legacyUserProfileCustomizations.stylesheets` is *saved* as `true` in `prefs.js`, and the
+system files (`sheepfox.cfg`, `local-settings.js`, `policies.json`).
+
+| Symptom | Cause | Fix |
+| :--- | :--- | :--- |
+| Doctor says the files are missing | installers write to the **active** profile only | `.\scripts\install-windows.bat -ProfilePath "%APPDATA%\Mozilla\Firefox\Profiles\<yours>"` |
+| Doctor passes, nothing changes | Firefox still running (config is read at startup) | quit fully — Task Manager must show no `firefox.exe` — then relaunch |
+| Doctor passes, CSS still ignored | pref saved as `false` by another hardening tool | `about:config` → `toolkit.legacyUserProfileCustomizations.stylesheets` → `true`, restart |
+| New Tab logo changed but no pill | older Firefox without `:has()` support (< 121) | upgrade, or use the `.default`-profile rules only |
+| Windows Store Firefox | profile lives under `%LOCALAPPDATA%\Packages\Mozilla.Firefox_*` | pass `-ProfilePath` explicitly |
+| Everything looks right | need proof CSS loads at all | append `#nav-bar { background: #cc0000 !important; }` to `<profile>\chrome\userChrome.css`; toolbar turns red ⇒ CSS loads, remove the line and report the selector |
+
+Prove *where* your profile is:
+
+```powershell
+Get-ChildItem "$env:APPDATA\Mozilla\Firefox\Profiles" -Directory |
+  ForEach-Object { "$($_.Name)  chrome=$(Test-Path (Join-Path $_.FullName 'chrome\userChrome.css'))  user.js=$(Test-Path (Join-Path $_.FullName 'user.js'))" }
+```
 
 ## How `// @lock` works
 

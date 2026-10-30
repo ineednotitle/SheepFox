@@ -278,8 +278,11 @@ class TestFloatingSearchUI(unittest.TestCase):
 
     def test_pill_is_scoped_to_blank_tabs(self) -> None:
         css = read(self.CHROME)
-        selector = '#urlbar[pageproxystate="invalid"]:not([focused])'
+        selector = '#urlbar[pageproxystate="invalid"]:is(:not([focused]), :has(#urlbar-input:placeholder-shown))'
         self.assertIn(selector, css, msg="pill must only match a blank tab")
+        # Must not depend on the address bar being unfocused: Firefox autofocuses
+        # it on a new tab, which would otherwise hide the pill.
+        self.assertIn(":has(#urlbar-input:placeholder-shown)", css)
         self.assertIn("position: fixed", css)
         self.assertIn("translateX(-50%)", css, msg="pill must be horizontally centred")
         self.assertIn("border-radius: var(--sheepfox-pill-radius)", css)
@@ -287,6 +290,17 @@ class TestFloatingSearchUI(unittest.TestCase):
         self.assertIn("clamp(", css, msg="pill width must be responsive")
         # Never hide or disable the address bar itself.
         self.assertNotRegex(css, r"#urlbar\s*\{[^}]*display:\s*none")
+
+    def test_expanded_results_state_stays_centred(self) -> None:
+        css = read(self.CHROME)
+        self.assertIn('[breakout-extend]', css, msg="results-open state must be handled")
+        # In the expanded state the height must stay auto so Gecko can grow the
+        # bar for the results panel.
+        expanded = css.split('[breakout-extend] {', 1)
+        self.assertEqual(len(expanded), 2, msg="missing expanded-state rule block")
+        block = expanded[1].split("}", 1)[0]
+        self.assertIn("min-height", block)
+        self.assertNotIn("height:", block.replace("min-height:", ""))
 
     def test_dark_mode_and_reduced_motion(self) -> None:
         css = read(self.CHROME)
@@ -678,6 +692,48 @@ class TestInstallers(unittest.TestCase):
             self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
             self.assertTrue((profile / "user.js").is_file())
             self.assertFalse((profile / "chrome").exists())
+
+    def test_doctor_passes_on_a_good_install(self) -> None:
+        installer = REPO_ROOT / "scripts" / "install.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "profile"
+            profile.mkdir()
+            subprocess.run(
+                [sys.executable, str(installer), "--profile", str(profile)],
+                capture_output=True,
+                check=True,
+            )
+            result = subprocess.run(
+                [sys.executable, str(installer), "--profile", str(profile), "--doctor"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+            self.assertIn("doctor", result.stdout)
+            self.assertIn("[OK  ] chrome/userChrome.css", result.stdout)
+            self.assertNotIn("FAIL", result.stdout)
+
+    def test_doctor_fails_on_a_bare_profile(self) -> None:
+        installer = REPO_ROOT / "scripts" / "install.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "profile"
+            profile.mkdir()
+            result = subprocess.run(
+                [sys.executable, str(installer), "--profile", str(profile), "--doctor"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 1, msg=result.stdout)
+            self.assertIn("[FAIL] user.js present", result.stdout)
+            self.assertIn("[FAIL] chrome/userChrome.css", result.stdout)
+
+    def test_windows_doctor_switch_is_wired(self) -> None:
+        text = (REPO_ROOT / "scripts" / "install-windows.ps1").read_text(encoding="utf-8")
+        self.assertIn("[switch]$Doctor", text)
+        self.assertIn("Report-Check", text)
+        self.assertIn("prefs.js", text)
 
     def test_unix_wrapper_delegates_to_python(self) -> None:
         wrapper = read(REPO_ROOT / "scripts" / "install-unix.sh")

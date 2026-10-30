@@ -1,8 +1,7 @@
 /* ============================================================================
    (SheepFox) Firefox — userChrome.css
    "Floating search" UI: on a blank/new tab the address+search bar floats,
-   centred, as a rounded pill — the Zen / Arc new-tab look — then docks back
-   into the toolbar the moment you focus it or load a page.
+   centred, as a rounded pill — the Zen / Arc new-tab look.
 
    Requires: toolkit.legacyUserProfileCustomizations.stylesheets = true
              (already set by config/modules/03-cleanfox.js)
@@ -10,9 +9,16 @@
    Installed to: <profile>/chrome/userChrome.css
    Revert:       delete this file, or run the installer with --no-ui.
 
-   Scope: the rules only match #urlbar[pageproxystate="invalid"], i.e. a tab
-   with no loaded page. Typing in the address bar of a normal page, or any
-   navigation, leaves the stock toolbar layout untouched.
+   HOW IT DECIDES A TAB IS "BLANK"
+   Firefox gives the URL bar pageproxystate="invalid" whenever it is not showing
+   a loaded page's address, and #urlbar-input:placeholder-shown is true only
+   while the field is empty. Requiring BOTH means:
+     * new tab, address bar autofocused (Firefox does this)  -> pill
+     * new tab, address bar not focused                      -> pill
+     * typing in the address bar of a real page              -> untouched
+     * normal browsing / navigation                          -> untouched
+   The :is(:not([focused]), :has(...)) form keeps a working fallback on Firefox
+   < 121, which lacks :has() (forgiving selector list).
    ============================================================================ */
 
 @namespace url("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul");
@@ -22,7 +28,7 @@
   --sheepfox-pill-width: clamp(320px, 58vw, 760px);
   --sheepfox-pill-height: 56px;
   --sheepfox-pill-radius: 28px;
-  --sheepfox-pill-top: 24vh;
+  --sheepfox-pill-top: 22vh;
   --sheepfox-pill-shadow:
     0 18px 44px rgba(0, 0, 0, 0.20),
     0 2px 10px rgba(0, 0, 0, 0.12);
@@ -55,9 +61,9 @@
 }
 
 /* ----------------------------------------------------------------------------
-   1. THE FLOATING PILL  (blank/new tab, address bar not focused yet)
+   1. THE FLOATING PILL — blank tab, results closed
    ------------------------------------------------------------------------- */
-#urlbar[pageproxystate="invalid"]:not([focused]):not([breakout-extend]) {
+#urlbar[pageproxystate="invalid"]:is(:not([focused]), :has(#urlbar-input:placeholder-shown)):not([breakout-extend]) {
   position: fixed !important;
   top: var(--sheepfox-pill-top) !important;
   left: 50% !important;
@@ -81,8 +87,8 @@
 }
 
 /* Firefox paints the bar's surface on #urlbar-background, not #urlbar, so the
-   pill's fill/border/radius must be applied there too (radius is inherited). */
-#urlbar[pageproxystate="invalid"]:not([focused]):not([breakout-extend]) #urlbar-background {
+   pill's fill/border/radius must be applied there too. */
+#urlbar[pageproxystate="invalid"]:is(:not([focused]), :has(#urlbar-input:placeholder-shown)) #urlbar-background {
   border: 1px solid var(--sheepfox-pill-border) !important;
   border-radius: var(--sheepfox-pill-radius) !important;
   background: var(--sheepfox-pill-bg) !important;
@@ -91,56 +97,64 @@
 }
 
 /* Inner padding + a comfortable hit area for the taller pill. */
-#urlbar[pageproxystate="invalid"]:not([focused]):not([breakout-extend]) .urlbar-input-container {
-  height: 100% !important;
+#urlbar[pageproxystate="invalid"]:is(:not([focused]), :has(#urlbar-input:placeholder-shown)):not([breakout-extend]) .urlbar-input-container {
+  min-height: var(--sheepfox-pill-height) !important;
   padding-inline: 22px 18px !important;
   border: none !important;
   background: transparent !important;
 }
 
 /* Bigger text, centred placeholder: reads as a search field, like Arc/Zen. */
-#urlbar[pageproxystate="invalid"]:not([focused]):not([breakout-extend]) #urlbar-input {
+#urlbar[pageproxystate="invalid"]:is(:not([focused]), :has(#urlbar-input:placeholder-shown)):not([breakout-extend]) #urlbar-input {
   font-size: 16px !important;
   color: var(--sheepfox-pill-text) !important;
 }
 
-#urlbar[pageproxystate="invalid"]:not([focused]):not([breakout-extend]) #urlbar-input::placeholder {
+#urlbar[pageproxystate="invalid"]:is(:not([focused]), :has(#urlbar-input:placeholder-shown)):not([breakout-extend]) #urlbar-input::placeholder {
   text-align: center !important;
   opacity: 0.72 !important;
 }
 
 /* Keep the pill clean on a blank tab: no shield, no page-action clutter. */
-#urlbar[pageproxystate="invalid"]:not([focused]):not([breakout-extend]) #identity-box,
-#urlbar[pageproxystate="invalid"]:not([focused]):not([breakout-extend]) #page-action-buttons,
-#urlbar[pageproxystate="invalid"]:not([focused]):not([breakout-extend]) .urlbar-go-button {
+#urlbar[pageproxystate="invalid"]:is(:not([focused]), :has(#urlbar-input:placeholder-shown)) #identity-box,
+#urlbar[pageproxystate="invalid"]:is(:not([focused]), :has(#urlbar-input:placeholder-shown)) #page-action-buttons,
+#urlbar[pageproxystate="invalid"]:is(:not([focused]), :has(#urlbar-input:placeholder-shown)) .urlbar-go-button {
   display: none !important;
 }
 
 /* Subtle lift on hover (a hint that it is one big target). */
-#urlbar[pageproxystate="invalid"]:not([focused]):not([breakout-extend]):hover {
+#urlbar[pageproxystate="invalid"]:is(:not([focused]), :has(#urlbar-input:placeholder-shown)):not([breakout-extend]):hover {
   box-shadow: var(--sheepfox-pill-shadow-hover) !important;
   transform: translateX(-50%) scale(1.008) !important;
 }
 
+/* ----------------------------------------------------------------------------
+   2. RESULTS OPEN ON AN EMPTY TAB — stay centred, let Gecko size the panel
+   (happens when the address bar is autofocused on a new tab)
+   ------------------------------------------------------------------------- */
+#urlbar[pageproxystate="invalid"]:has(#urlbar-input:placeholder-shown)[breakout-extend] {
+  position: fixed !important;
+  top: var(--sheepfox-pill-top) !important;
+  left: 50% !important;
+  right: auto !important;
+  transform: translateX(-50%) !important;
+  width: var(--sheepfox-pill-width) !important;
+  min-width: var(--sheepfox-pill-width) !important;
+  max-width: var(--sheepfox-pill-width) !important;
+  min-height: var(--sheepfox-pill-height) !important;
+  margin: 0 !important;
+  border-radius: var(--sheepfox-pill-radius) !important;
+  background: var(--sheepfox-pill-bg) !important;
+  box-shadow: var(--sheepfox-pill-shadow) !important;
+  z-index: 20 !important;
+}
+
 /* Make the toolbar itself recede on a blank tab, so the pill reads as floating
-   on the page rather than sitting in a strip. :has() needs Firefox 121+; on
-   older versions this rule is simply ignored and the layout stays stock. */
-#nav-bar:has(#urlbar[pageproxystate="invalid"]:not([focused]):not([breakout-extend])) {
+   on the page rather than sitting in a strip. */
+#nav-bar:has(#urlbar[pageproxystate="invalid"]:is(:not([focused]), :has(#urlbar-input:placeholder-shown))) {
   background: transparent !important;
   border-color: transparent !important;
   box-shadow: none !important;
-}
-
-/* ----------------------------------------------------------------------------
-   2. FOCUS / DROPDOWN STATE — hand control straight back to Gecko
-   Focusing the pill docks it back into the toolbar so the results panel,
-   keyboard shortcuts and breakout sizing behave exactly like stock Firefox.
-   ------------------------------------------------------------------------- */
-#urlbar[focused],
-#urlbar[breakout-extend] {
-  transition:
-    box-shadow var(--sheepfox-pill-speed) ease,
-    transform var(--sheepfox-pill-speed) ease !important;
 }
 
 /* ----------------------------------------------------------------------------
@@ -155,7 +169,7 @@
 /* Respect the OS reduced-motion setting. */
 @media (prefers-reduced-motion: reduce) {
   #urlbar,
-  #urlbar[pageproxystate="invalid"]:not([focused]):not([breakout-extend]) {
+  #urlbar[pageproxystate="invalid"]:is(:not([focused]), :has(#urlbar-input:placeholder-shown)):not([breakout-extend]) {
     transition: none !important;
   }
 }
