@@ -81,12 +81,17 @@
 #titlebar,
 #navigator-toolbox,
 #nav-bar,
-#urlbar-container {
+#urlbar-container,
+#urlbar > .urlbar-input-container {
   transform: none !important;
+  translate: none !important;
+  rotate: none !important;
+  scale: none !important;
   filter: none !important;
   perspective: none !important;
   backdrop-filter: none !important;
   contain: none !important;
+  container-type: normal !important;
   will-change: auto !important;
   overflow: visible !important;
 }
@@ -106,11 +111,15 @@
      list grows downwards instead of dragging the field up. */
   top: calc(var(--sheepfox-pill-top) - var(--sheepfox-pill-height) / 2) !important;
   bottom: auto !important;
-  /* Centred with `translate`, never `transform`: Firefox animates the bar with
-     transforms of its own and the two fight. This is what Zen does. */
-  left: 50vw !important;
-  translate: -50% 0 !important;
-  right: auto !important;
+  /* Centred with auto inline margins across the full width, NOT with
+     left:50%+translate. The translate version assumed the containing block was
+     the window; when an ancestor claims the fixed element, the bar ends up
+     shifted left by half its own width. left:0 + right:0 + margin:auto centres
+     inside whatever box it lands in, so it is right either way. */
+  left: 0 !important;
+  right: 0 !important;
+  margin-inline: auto !important;
+  translate: none !important;
   width: var(--sheepfox-pill-width) !important;
   min-width: var(--sheepfox-pill-width) !important;
   max-width: var(--sheepfox-pill-width) !important;
@@ -123,7 +132,10 @@
   border-radius: var(--sheepfox-pill-radius) !important;
   background: var(--sheepfox-pill-bg) !important;
   box-shadow: var(--sheepfox-pill-shadow) !important;
+  /* Firefox draws a violet focus ring on the field; the pill is the affordance. */
+  outline: none !important;
   z-index: 100000 !important;
+  overflow: visible !important;
   visibility: visible !important;
   opacity: 1 !important;
   transition:
@@ -162,8 +174,13 @@
   display: none !important;
 }
 
-#urlbar:is([pageproxystate="invalid"], [focused="true"]) #urlbar-results {
+#urlbar:is([pageproxystate="invalid"], [focused="true"], [open]) #urlbar-results {
+  /* Pin the panel to the pill instead of letting it keep the toolbar geometry:
+     that mismatch is what made the list sit half a pill width to the right. */
   margin: 8px 0 10px !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  inset-inline: 0 !important;
 }
 
 #urlbar:is([pageproxystate="invalid"], [focused="true"]) .urlbarView {

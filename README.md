@@ -185,9 +185,10 @@ you type, the list opens **underneath** the pill (Arc/Zen behaviour) and the pil
 load the page and it docks back into the stock toolbar with normal autocomplete.
 
 The implementation follows Zen Browser's own `floating-urlbar` theme: `position: fixed` with
-`!important` on the properties Firefox otherwise sets itself (`top`, `left`, `width`), and centring
-done with `left: 50%` + `translate: -50% 0` rather than `transform` — Firefox animates the bar with
-transforms of its own, and the two fight.
+`!important` on the properties Firefox otherwise sets itself (`top`, `left`, `width`). Centring is
+done with `left: 0` + `right: 0` + `margin-inline: auto`, which centres inside whatever box the fixed
+bar lands in — `left: 50%` + `translate: -50%` assumed the containing block was the window and
+drifted half a pill width to the left whenever an ancestor claimed it.
 
 **No `@namespace`.** Almost every floating-urlbar snippet on the internet opens with
 `@namespace url("...there.is.only.xul")`. That sets the *default* namespace, which applies to type

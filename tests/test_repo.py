@@ -329,10 +329,15 @@ class TestFloatingSearchUI(unittest.TestCase):
         for prop in ("top:", "left:", "width:", "position:"):
             self.assertIn(prop, shell)
         self.assertIn("!important", shell)
-        # Centre with `translate`, never `transform`: Firefox animates the bar
-        # with transforms of its own and the two fight. This is Zen's approach.
-        self.assertIn("translate: -50% 0", shell)
-        self.assertIn("left: 50vw", shell, msg="horizontal anchor must be viewport-relative")
+        # Centre with auto inline margins. left:%+translate assumed the window
+        # was the containing block; when an ancestor claims the fixed bar it
+        # lands half a pill width to the left. left:0 + right:0 + margin:auto is
+        # correct either way.
+        self.assertIn("left: 0 !important", shell)
+        self.assertIn("right: 0 !important", shell)
+        self.assertIn("margin-inline: auto", shell)
+        self.assertNotIn("translate: -50%", shell, msg="translate centring drifts off-centre")
+        self.assertIn("outline: none", shell, msg="the pill replaces Firefox's focus ring")
         self.assertIn("visibility: visible", shell)
         self.assertIn("opacity: 1", shell)
         self.assertNotRegex(shell, r"(?m)^\s*transform:", msg="never transform the pill into place")
@@ -380,6 +385,8 @@ class TestFloatingSearchUI(unittest.TestCase):
         self.assertIn("max-height: 62vh", grown)
         # No ancestor may become the containing block of the fixed bar.
         self.assertIn("will-change: auto", css)
+        self.assertIn("translate: none", css, msg="ancestor translate creates a containing block")
+        self.assertIn("container-type: normal", css)
 
     def test_empty_new_tab_collapses_the_suggestions_panel(self) -> None:
         # Firefox opens the awesomebar results view on the new-tab autofocus;
