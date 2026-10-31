@@ -71,12 +71,16 @@ function environment() {
   let responder = function () {
     return { rows: [] };
   };
+  let bookmarkHandler = function (folderId) {
+    return { folderId: folderId || null, title: "Bookmarks", items: [] };
+  };
 
   window.browser = {
     runtime: {
       sendMessage: async function (message) {
         sent.push(message);
         if (message.type === "sheepfox-query") return responder(message.text);
+        if (message.type === "sheepfox-bookmarks") return bookmarkHandler(message.folderId);
         return { ok: true };
       },
     },
@@ -92,6 +96,9 @@ function environment() {
     sent,
     respondWith(fn) {
       responder = fn;
+    },
+    bookmarksWith(fn) {
+      bookmarkHandler = fn;
     },
     mount(options) {
       const merged = Object.assign({ container: window.document.body, doc: window.document, mode: "overlay" }, options);
@@ -114,6 +121,33 @@ function rows(count) {
   return output;
 }
 
+function shelf() {
+  return [
+    { id: "b1", kind: "bookmark", title: "GitHub", url: "https://github.com/", initial: "G", hue: 140 },
+    { id: "f1", kind: "folder", title: "Dev", url: "", initial: "D", hue: 20, childCount: 2 },
+    { id: "b2", kind: "bookmark", title: "MDN", url: "https://developer.mozilla.org/", initial: "M", hue: 210 },
+  ];
+}
+
+function folderShelf(folderId) {
+  if (folderId === "f1") {
+    return {
+      folderId: "f1",
+      title: "Dev",
+      items: [{ id: "b3", kind: "bookmark", title: "Hooks", url: "https://react.dev/", initial: "H", hue: 190 }],
+    };
+  }
+  return { folderId: null, title: "Bookmarks", items: shelf() };
+}
+
+function press(env, node, key, extra) {
+  node.dispatchEvent(new env.window.KeyboardEvent("keydown", Object.assign({ key: key, bubbles: true }, extra)));
+}
+
+function clickTile(env, node) {
+  node.dispatchEvent(new env.window.MouseEvent("mousedown", { bubbles: true, button: 0 }));
+}
+
 async function type(env, text) {
   const input = env.document.querySelector(".sheepfox-input");
   input.value = text;
@@ -132,8 +166,10 @@ async function main() {
 
     const input = env.document.querySelector(".sheepfox-input");
     assertEqual(input.getAttribute("role"), "combobox");
-    assertEqual(input.getAttribute("aria-controls"), "sheepfox-list");
+    // The empty state is the bookmark shelf, so the combobox owns the grid.
+    assertEqual(input.getAttribute("aria-controls"), "sheepfox-grid");
     assertEqual(input.getAttribute("aria-expanded"), "false");
+    assertEqual(env.document.querySelector(".sheepfox-grid").getAttribute("role"), "listbox");
     assertEqual(env.document.querySelector(".sheepfox-list").getAttribute("role"), "listbox");
     bar.destroy();
   });
@@ -316,6 +352,157 @@ async function main() {
 
     await tick(200); // the stale answer arrives late and must be ignored
     assertEqual(env.document.querySelectorAll(".sheepfox-row").length, 1, "a stale response overwrote the list");
+    bar.destroy();
+  });
+
+  await test("the empty state is the bookmarks shelf, not an empty list", async () => {
+    const env = environment();
+    env.bookmarksWith(folderShelf);
+    const bar = env.mount();
+
+    await tick();
+    const asked = env.sent.find((message) => message.type === "sheepfox-bookmarks");
+    assert(asked, "the bar never asked for the bookmarks toolbar");
+    assertEqual(asked.folderId, null, "the first request is the toolbar root");
+
+    const input = env.document.querySelector(".sheepfox-input");
+    assertEqual(input.getAttribute("aria-controls"), "sheepfox-grid");
+    assertEqual(input.getAttribute("aria-expanded"), "true");
+
+    const tiles = env.document.querySelectorAll(".sheepfox-tile");
+    assertEqual(tiles.length, 3);
+    assertEqual(env.document.querySelectorAll(".sheepfox-row").length, 0, "the list must stay hidden");
+    assertEqual(env.document.querySelector(".sheepfox-grid").hidden, false);
+    assertEqual(env.document.querySelector(".sheepfox-list").hidden, true);
+
+    // The letter tile is a real fallback: Firefox has no bookmark favicon API.
+    const glyph = tiles[0].querySelector(".sheepfox-tile-glyph");
+    assertEqual(glyph.textContent, "G");
+    assertEqual(tiles[0].querySelector(".sheepfox-tile-title").textContent, "GitHub");
+    // A folder shows how much is inside it.
+    assertEqual(tiles[1].querySelector(".sheepfox-tile-count").textContent, "2");
+    bar.destroy();
+  });
+
+  await test("clicking a folder descends into it and Back returns", async () => {
+    const env = environment();
+    env.bookmarksWith(folderShelf);
+    const bar = env.mount();
+    await tick();
+
+    clickTile(env, env.document.querySelectorAll(".sheepfox-tile")[1]);
+    await tick();
+
+    const asked = env.sent.filter((message) => message.type === "sheepfox-bookmarks").pop();
+    assertEqual(asked.folderId, "f1", "the folder id was not requested");
+
+    let tiles = env.document.querySelectorAll(".sheepfox-tile");
+    assertEqual(tiles.length, 1);
+    assertEqual(tiles[0].querySelector(".sheepfox-tile-title").textContent, "Hooks");
+
+    const crumb = env.document.querySelector(".sheepfox-crumb");
+    assertEqual(crumb.hidden, false, "the folder bar must appear inside a folder");
+    assertEqual(crumb.querySelector(".sheepfox-crumb-label").textContent, "Dev");
+
+    const back = env.document.querySelector(".sheepfox-back");
+    back.dispatchEvent(new env.window.MouseEvent("mousedown", { bubbles: true, button: 0 }));
+    await tick();
+
+    const rootRequest = env.sent.filter((message) => message.type === "sheepfox-bookmarks").pop();
+    assertEqual(rootRequest.folderId, null, "Back must return to the toolbar root");
+    tiles = env.document.querySelectorAll(".sheepfox-tile");
+    assertEqual(tiles.length, 3);
+    assertEqual(env.document.querySelector(".sheepfox-crumb").hidden, true);
+    bar.destroy();
+  });
+
+  await test("Escape inside a folder steps up before it closes", async () => {
+    const env = environment();
+    env.bookmarksWith(folderShelf);
+    let closed = 0;
+    const bar = env.mount({ onClose: () => { closed += 1; } });
+    await tick();
+
+    clickTile(env, env.document.querySelectorAll(".sheepfox-tile")[1]);
+    await tick();
+    const input = env.document.querySelector(".sheepfox-input");
+
+    press(env, input, "Escape");
+    await tick();
+    assertEqual(closed, 0, "the first Escape must only leave the folder");
+    assertEqual(env.document.querySelector(".sheepfox-crumb").hidden, true);
+    assertEqual(env.document.querySelectorAll(".sheepfox-tile").length, 3);
+
+    press(env, input, "Escape");
+    await tick();
+    assertEqual(closed, 1, "the second Escape closes the bar");
+    bar.destroy();
+  });
+
+  await test("typing swaps the shelf for results and clearing brings it back", async () => {
+    const env = environment();
+    env.bookmarksWith(folderShelf);
+    env.respondWith(() => ({ rows: rows(2) }));
+    const bar = env.mount();
+    await tick();
+
+    await type(env, "exa");
+    assertEqual(env.document.querySelector(".sheepfox-grid").hidden, true);
+    assertEqual(env.document.querySelectorAll(".sheepfox-row").length, 2);
+    assertEqual(env.document.querySelector(".sheepfox-input").getAttribute("aria-controls"), "sheepfox-list");
+
+    await type(env, "");
+    assertEqual(env.document.querySelector(".sheepfox-grid").hidden, false);
+    assertEqual(env.document.querySelectorAll(".sheepfox-tile").length, 3, "clearing must restore the shelf");
+    assertEqual(env.document.querySelectorAll(".sheepfox-row").length, 0);
+    bar.destroy();
+  });
+
+  await test("clicking a bookmark tile opens it and closes", async () => {
+    const env = environment();
+    env.bookmarksWith(folderShelf);
+    let closed = 0;
+    const bar = env.mount({ onClose: () => { closed += 1; } });
+    await tick();
+
+    clickTile(env, env.document.querySelectorAll(".sheepfox-tile")[2]);
+    await tick();
+
+    const opened = env.sent.find((message) => message.type === "sheepfox-open");
+    assert(opened, "clicking a tile did nothing");
+    assertEqual(opened.row.url, "https://developer.mozilla.org/");
+    assertEqual(opened.options.newTab, false);
+    assertEqual(closed, 1);
+    bar.destroy();
+  });
+
+  await test("clicking outside the bar hides it", async () => {
+    const env = environment();
+    env.bookmarksWith(folderShelf);
+    let closed = 0;
+    const bar = env.mount({ mode: "overlay", onClose: () => { closed += 1; } });
+    await tick();
+
+    const backdrop = env.document.querySelector(".sheepfox-backdrop");
+    assert(backdrop, "the overlay needs a backdrop to catch outside clicks");
+    backdrop.dispatchEvent(new env.window.MouseEvent("mousedown", { bubbles: true, button: 0 }));
+    await tick();
+
+    assertEqual(closed, 1);
+    assertEqual(env.document.querySelectorAll(".sheepfox-bar").length, 0);
+    bar.destroy();
+  });
+
+  await test("an empty toolbar explains itself instead of showing a blank box", async () => {
+    const env = environment();
+    env.bookmarksWith(() => ({ folderId: null, title: "Bookmarks", items: [] }));
+    const bar = env.mount();
+    await tick();
+
+    assertEqual(env.document.querySelectorAll(".sheepfox-tile").length, 0);
+    const empty = env.document.querySelector(".sheepfox-empty");
+    assert(empty, "an empty shelf needs a message");
+    assert(empty.textContent.length > 0);
     bar.destroy();
   });
 

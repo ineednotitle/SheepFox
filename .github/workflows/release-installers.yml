@@ -194,10 +194,13 @@ jobs:
             ### Floating URL Bar extension (optional)
 
             `SheepFox-Floating-URL-Bar-<version>.xpi` is the optional WebExtension:
-            a floating, Arc/Zen-style address bar on `Ctrl+Shift+Space` with results
-            from your open tabs, bookmarks, history and the web. It is **not** part of
-            the installers - extensions cannot style the browser chrome, and an
-            unsigned `.xpi` cannot be installed permanently in release Firefox.
+            a floating, Arc/Zen-style address bar on `Ctrl+Shift+Space`. Before you
+            type it is a shelf of your bookmarks toolbar - folders open in place with
+            a **Back** row, titles wrap, tiles are letter chips whose colour is hashed
+            from the host - and as you type it is one list: open tabs, bookmarks,
+            history and the web. Clicking outside hides it. It is **not** part of the
+            installers - extensions cannot style the browser chrome, and an unsigned
+            `.xpi` cannot be installed permanently in release Firefox.
 
             * Try it now: `about:debugging#/runtime/this-firefox` -> **Load Temporary
               Add-on** -> pick the `.xpi`. It stays until Firefox restarts.

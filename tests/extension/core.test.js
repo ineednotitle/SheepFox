@@ -175,6 +175,105 @@ test("rank tolerates missing collections", () => {
 });
 
 /* ------------------------------------------------------------------ */
+/* the bookmark grid                                                   */
+/* ------------------------------------------------------------------ */
+
+test("hostOf strips the www. prefix and refuses to throw", () => {
+  assert.equal(core.hostOf("https://www.github.com/a"), "github.com");
+  assert.equal(core.hostOf("https://developer.mozilla.org/"), "developer.mozilla.org");
+  assert.equal(core.hostOf("not a url"), "");
+  assert.equal(core.hostOf(undefined), "");
+});
+
+test("hueOf is deterministic and inside the colour wheel", () => {
+  assert.equal(core.hueOf("github.com"), core.hueOf("github.com"));
+  assert.notEqual(core.hueOf("github.com"), core.hueOf("mozilla.org"));
+  for (const text of ["", "a", "https://example.test/", "x".repeat(400)]) {
+    const hue = core.hueOf(text);
+    assert.ok(Number.isInteger(hue) && hue >= 0 && hue < 360, `hue out of range for ${text}`);
+  }
+});
+
+test("initialOf uppercases one character and never returns nothing", () => {
+  assert.equal(core.initialOf("github"), "G");
+  assert.equal(core.initialOf("  mozilla"), "M");
+  assert.equal(core.initialOf(""), "?");
+  assert.equal(core.initialOf(undefined), "?");
+  // A surrogate pair must stay one character, not half of one.
+  assert.equal(core.initialOf("🦊 fox"), "🦊");
+});
+
+test("toGridItems skips separators and gives untitled bookmarks a name", () => {
+  const items = core.toGridItems([
+    { id: "1", type: "bookmark", title: "GitHub", url: "https://github.com/" },
+    { id: "2", type: "separator" },
+    { id: "3", type: "bookmark", title: "", url: "https://www.mozilla.org/en-US/" },
+    null,
+  ]);
+  assert.equal(items.length, 2);
+  assert.deepEqual(items.map((item) => item.kind), ["bookmark", "bookmark"]);
+  assert.equal(items[0].title, "GitHub");
+  assert.equal(items[0].initial, "G");
+  assert.equal(items[1].title, "mozilla.org", "a blank title falls back to the host");
+  assert.equal(items[1].subtitle, "mozilla.org");
+});
+
+test("toGridItems marks folders, counts children and needs no url", () => {
+  const items = core.toGridItems([
+    {
+      id: "f",
+      type: "folder",
+      title: "Dev",
+      children: [
+        { id: "a", type: "bookmark", title: "A", url: "https://a.test/" },
+        { id: "b", type: "bookmark", title: "B", url: "https://b.test/" },
+        { id: "s", type: "separator" },
+      ],
+    },
+  ]);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].kind, "folder");
+  assert.equal(items[0].title, "Dev");
+  assert.equal(items[0].url, "");
+  assert.equal(items[0].childCount, 3, "the count is raw, the grid decides what to do with it");
+  assert.equal(items[0].favicon, "");
+});
+
+test("toGridItems keeps the order the toolbar was arranged in", () => {
+  const items = core.toGridItems([
+    { id: "1", type: "bookmark", title: "Zebra", url: "https://z.test/" },
+    { id: "2", type: "bookmark", title: "Apple", url: "https://a.test/" },
+  ]);
+  assert.deepEqual(items.map((item) => item.title), ["Zebra", "Apple"]);
+});
+
+test("toGridItems stops at MAX_TILES and copes with no nodes", () => {
+  const many = [];
+  for (let index = 0; index < core.MAX_TILES + 20; index += 1) {
+    many.push({ id: String(index), type: "bookmark", title: `Site ${index}`, url: `https://s${index}.test/` });
+  }
+  assert.equal(core.toGridItems(many).length, core.MAX_TILES);
+  assert.deepEqual(core.toGridItems([]), []);
+  assert.deepEqual(core.toGridItems(undefined), []);
+});
+
+test("toGridItems only carries a favicon a node actually has", () => {
+  const items = core.toGridItems([
+    { id: "1", type: "bookmark", title: "A", url: "https://a.test/", faviconUrl: "data:image/png;base64,AA" },
+    { id: "2", type: "bookmark", title: "B", url: "https://b.test/" },
+  ]);
+  assert.equal(items[0].favicon, "data:image/png;base64,AA");
+  assert.equal(items[1].favicon, "", "no favicon means the letter tile, never a network fetch");
+});
+
+test("toGridItems gives every tile a stable id and colour", () => {
+  const first = core.toGridItems([{ id: "x", type: "bookmark", title: "X", url: "https://www.x.test/" }]);
+  const second = core.toGridItems([{ id: "x", type: "bookmark", title: "X", url: "https://x.test/" }]);
+  assert.equal(first[0].hue, second[0].hue, "www. must not change the colour");
+  assert.equal(first[0].id, "x");
+});
+
+/* ------------------------------------------------------------------ */
 
 if (failures.length) {
   for (const failure of failures) console.error("FAIL " + failure);

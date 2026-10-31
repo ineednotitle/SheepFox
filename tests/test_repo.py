@@ -640,6 +640,34 @@ class TestFloatingUrlBarExtension(unittest.TestCase):
         # The removed focus ring has to be replaced by something visible.
         self.assertIn(":focus-within", styles)
 
+    def test_empty_state_is_a_bookmark_shelf(self) -> None:
+        """The pill opens on your bookmarks, with folders you can walk into."""
+        ui = read(self.EXT / "ui.js")
+        self.assertIn("sheepfox-grid", ui)
+        self.assertIn("sheepfox-tile", ui)
+        # Folder navigation: a crumb with a Back control, Escape steps up.
+        self.assertIn("sheepfox-crumb", ui)
+        self.assertIn("sheepfox-back", ui)
+        self.assertIn("folderStack", ui)
+        self.assertIn("goBack", ui)
+        # Outside clicks dismiss the overlay, not just Escape.
+        self.assertIn("sheepfox-backdrop", ui)
+
+        background = read(self.EXT / "background.js")
+        self.assertIn('"sheepfox-bookmarks"', background)
+        self.assertIn("bookmarks.getSubTree", background)
+        self.assertIn("toolbar_____", background, "Firefox's toolbar root has a fixed id")
+
+        core = read(self.EXT / "core.js")
+        self.assertIn("MAX_TILES", core)
+        self.assertIn("toGridItems", core)
+        self.assertIn("hueOf", core)
+
+        styles = read(self.EXT / "styles.js")
+        self.assertIn(".sheepfox-grid", styles)
+        self.assertIn(".sheepfox-tile", styles)
+        self.assertIn("-webkit-line-clamp: 2", styles, "long bookmark titles wrap instead of stretching the tile")
+
     def test_stylesheet_is_valid_css(self) -> None:
         spec = importlib.util.find_spec("tinycss2")
         if spec is None:  # pragma: no cover - tinycss2 is a dev requirement
@@ -677,6 +705,19 @@ class TestFloatingUrlBarExtension(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
         self.assertIn("ok", result.stdout)
+
+    def test_background_reads_the_toolbar_and_routes_messages(self) -> None:
+        """background.js under stubs: which tree it reads and what the UI receives."""
+        if not self.NODE:  # pragma: no cover
+            self.skipTest("node is not installed")
+        result = subprocess.run(
+            [self.NODE, str(REPO_ROOT / "tests" / "extension" / "background.test.js")],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
+        self.assertIn("ok —", result.stdout)
 
     def test_ui_behaviour_in_a_dom(self) -> None:
         """Render the bar under jsdom: rows, keyboard, cleanup, text-not-HTML."""

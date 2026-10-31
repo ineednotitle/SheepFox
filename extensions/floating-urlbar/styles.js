@@ -69,6 +69,13 @@
   margin-inline: auto;
 }
 
+/* A percentage max-height needs a definite container, which the fixed pill is
+   not: cap the card itself so a long shelf scrolls instead of running off the
+   bottom of a short screen. */
+.sheepfox-bar--overlay .sheepfox-card {
+  max-height: min(560px, 68vh);
+}
+
 /* Window surface: the popup window is the pill, so the card fills it. */
 .sheepfox-bar--window {
   position: fixed;
@@ -146,6 +153,141 @@
   text-transform: uppercase;
 }
 
+/* ---- empty state: the bookmarks shelf ---- */
+
+.sheepfox-crumb {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px 8px;
+  color: var(--sf-dim);
+  font-size: 12.5px;
+}
+
+.sheepfox-crumb[hidden] {
+  display: none;
+}
+
+.sheepfox-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 10px 4px 6px;
+  border: 1px solid var(--sf-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--sf-text);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.sheepfox-back:hover {
+  background: var(--sf-hover);
+}
+
+.sheepfox-back-glyph {
+  width: 14px;
+  height: 14px;
+}
+
+.sheepfox-crumb-label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sheepfox-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 6px;
+  max-height: min(46vh, 330px);
+  margin: 0;
+  padding: 2px 12px 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.sheepfox-grid[hidden] {
+  display: none;
+}
+
+.sheepfox-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 6px;
+  border: 0;
+  border-radius: 16px;
+  background: transparent;
+  color: var(--sf-text);
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+
+.sheepfox-tile:hover {
+  background: var(--sf-hover);
+}
+
+.sheepfox-tile[aria-selected="true"] {
+  background: var(--sf-selected);
+}
+
+.sheepfox-tile-glyph {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background: hsl(var(--sf-tile-hue, 210) 62% 55% / 0.22);
+  color: hsl(var(--sf-tile-hue, 210) 72% 74%);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.sheepfox-tile-img {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  object-fit: contain;
+}
+
+.sheepfox-tile-glyph--folder {
+  background: var(--sf-hover);
+  color: var(--sf-accent);
+}
+
+.sheepfox-tile-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.sheepfox-tile-title {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.sheepfox-tile-count {
+  margin-top: -3px;
+  color: var(--sf-dim);
+  font-size: 10.5px;
+}
+
+.sheepfox-empty {
+  margin: 0;
+  padding: 10px 16px 14px;
+  color: var(--sf-dim);
+  font-size: 13px;
+}
+
 .sheepfox-list {
   min-height: 0;
   max-height: min(52vh, 380px);
@@ -215,10 +357,6 @@
   text-overflow: ellipsis;
 }
 
-.sheepfox-list:empty ~ .sheepfox-footer {
-  display: none;
-}
-
 .sheepfox-footer {
   display: flex;
   flex: none;
@@ -243,6 +381,13 @@
 
   .sheepfox-backdrop {
     background: rgba(15, 23, 42, 0.16);
+  }
+}
+
+@media (prefers-color-scheme: light) {
+  .sheepfox-tile-glyph {
+    background: hsl(var(--sf-tile-hue, 210) 70% 55% / 0.16);
+    color: hsl(var(--sf-tile-hue, 210) 55% 38%);
   }
 }
 
@@ -278,9 +423,15 @@
     background: transparent;
   }
 
-  .sheepfox-row[aria-selected="true"] {
+  .sheepfox-row[aria-selected="true"],
+  .sheepfox-tile[aria-selected="true"] {
     outline: 2px solid Highlight;
     outline-offset: -2px;
+  }
+
+  .sheepfox-tile-glyph {
+    background: Canvas;
+    color: CanvasText;
   }
 
   .sheepfox-input::placeholder,

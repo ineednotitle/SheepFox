@@ -1,14 +1,28 @@
 # (SheepFox) Floating URL Bar
 
 A floating, Arc/Zen-style address bar. Press **`Ctrl+Shift+Space`**
-(`Command+Shift+Space` on macOS) on any page, type, press `Enter`.
+(`Command+Shift+Space` on macOS) on any page, and one of two things is in front
+of you:
 
-It searches **your open tabs**, **bookmarks**, **history** and the web at once,
-in one list; a URL you type is the first row.
+- **before you type** — a shelf of your bookmarks, exactly as they are arranged
+  in the toolbar, with folders you can open in place;
+- **as you type** — one list that searches **your open tabs**, **bookmarks**,
+  **history** and the web at once; a URL you type is the first row.
 
 ```
 ┌───────────────────────────────────────────────────────────┐
 │  🌐  Search or enter an address                    esc     │
+├───────────────────────────────────────────────────────────┤
+│    G        D        M        Y        R        N          │
+│  GitHub   Dev     MDN    YouTube   Reddit    News          │
+│           12                                                │
+├───────────────────────────────────────────────────────────┤
+│  ↑ ↓ ← → move       ↵ open       type to search            │
+└───────────────────────────────────────────────────────────┘
+   type "github" and the shelf becomes a ranked list:
+
+┌───────────────────────────────────────────────────────────┐
+│  🌐  github                                            esc  │
 ├───────────────────────────────────────────────────────────┤
 │  ⟳  github.com                              Open address    │
 │  ▭  GitHub — pull requests                  Switch to tab   │
@@ -17,6 +31,33 @@ in one list; a URL you type is the first row.
 │  🔍  Search for “github”                    DuckDuckGo      │
 └───────────────────────────────────────────────────────────┘
 ```
+
+## The bookmark shelf
+
+The empty state is the thing a launcher usually forgets: an empty box. This one
+opens on the contents of your **Bookmarks Toolbar**, in the order you arranged
+them, so the first click is often no click at all.
+
+- **Folders open in place.** Click one (or press `Enter` on it) and the shelf
+  becomes that folder; a `← Back` row appears with the folder's name. `Esc` and
+  `Backspace` on an empty field also step up one level *before* they close the
+  bar, so walking back out of a folder never costs you the bar.
+- **Tiles.** A folder shows a folder icon and how many items it holds. A
+  bookmark shows its first letter on a coloured chip.
+- **Titles wrap to two lines** and are ellipsised after that, so a long bookmark
+  name makes a taller tile rather than a wider grid.
+- **Deterministic colour, not random.** The chip colour is a hash of the host, so
+  `github.com` is the same colour on every machine, on every reload, with no
+  storage and no flicker.
+- **No favicon service.** Firefox has no favicon API for bookmarks (Chromium's
+  `_favicon/` does not exist here), and fetching icons from a third party would
+  tell that third party which bookmarks you have. So tiles are letters, and a
+  favicon is used only when the bookmark node itself carries one.
+- **Only the toolbar, by design.** It is the shelf you curated, not a dump of
+  every folder in your profile. Bookmarks, history and open tabs are still all
+  searchable the moment you type.
+- **Clicking outside closes it**, in the overlay through the backdrop and in the
+  window through blur — the same gesture as every other floating surface.
 
 ## What it can and cannot do
 
@@ -99,9 +140,9 @@ remote code: until you press the shortcut, the extension does not touch any page
 ```text
 extensions/floating-urlbar/
 ├── manifest.json     MV3, Gecko id floating-urlbar@sheepfox, one command
-├── core.js           pure: URL interpretation + result ranking (no browser.*)
+├── core.js           pure: URL interpretation, ranking, bookmark-tile shaping
 ├── background.js     shortcut, query pipeline, which surface to use
-├── ui.js             shared renderer: list, keyboard, ARIA combobox pattern
+├── ui.js             shared renderer: bookmark shelf + result list, keyboard, ARIA
 ├── content.js        in-page surface (closed shadow root, on demand)
 ├── window.js         window surface (grows to fit the results)
 ├── styles.js         the stylesheet, as a string (see the note at the top)
@@ -112,14 +153,23 @@ extensions/floating-urlbar/
 `core.js` has no browser-API dependency on purpose: `tests/extension/core.test.js`
 runs it under plain `node` and covers the cases that are easy to get wrong —
 `localhost:3000` versus `localhost:` as a scheme, `1.5` versus `example.com`,
-ranking order, de-duplication and the row cap.
+ranking order, de-duplication, the row cap, and how Firefox's bookmark tree (with
+its separators and untitled entries) becomes tiles.
+
+`background.js` is the only file that touches privileged APIs, so
+`tests/extension/background.test.js` loads it into a node `vm` with a stub
+`browser` and pins down the parts that would otherwise need a browser to
+observe: which tree the shelf reads, what a folder request returns, what happens
+when a folder has been deleted, and how a message is routed.
 
 ## Keyboard
 
 | Key | Action |
 | :--- | :--- |
-| `Ctrl+Shift+Space` | open the bar (remap it in `about:addons` → gear → Manage Extension Shortcuts) |
-| `↑` `↓` / `Tab` | move through results |
-| `Enter` | open in the current tab (a tab row switches to that tab) |
-| `Ctrl`/`⌘` + `Enter` | open in a new tab |
-| `Esc` | close |
+| `Ctrl+Shift+Space` | open the bar (remap it in `about:addons` → gear → **Manage Extension Shortcuts** — the shortcut is a normal extension command, not a hardcoded key) |
+| `↑` `↓` `←` `→` / `Tab` | move through the shelf or the results |
+| `Enter` | open the selected tile/row (a folder opens, a tab row switches to that tab) |
+| `Ctrl`/`⌘` + `Enter` | open a result in a new tab |
+| `Esc` | inside a folder: back one level. anywhere else: close |
+| `Backspace` on an empty field | back one level |
+| click outside the bar | close |

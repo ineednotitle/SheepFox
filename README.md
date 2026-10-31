@@ -110,16 +110,17 @@ SheepFox/
 │
 ├── extensions/floating-urlbar/      # the optional Floating URL Bar WebExtension
 │   ├── manifest.json                # MV3, Gecko id floating-urlbar@sheepfox
-│   ├── core.js                      # URL interpretation + ranking (pure, node-tested)
-│   ├── background.js                # shortcut, query pipeline, surface selection
-│   ├── ui.js / styles.js            # shared renderer (ARIA combobox pattern)
+│   ├── core.js                      # URL parsing, ranking, bookmark tiles (pure, node-tested)
+│   ├── background.js                # shortcut, query + toolbar pipeline, surface selection
+│   ├── ui.js / styles.js            # shared renderer: bookmark shelf + results (ARIA)
 │   ├── content.js / window.js       # in-page overlay / popup-window surface
 │   └── search.html, icons/bar.svg
 │
 ├── scripts/                         # install.py, install-unix.sh, install-windows.{bat,ps1}
-├── tests/test_repo.py               # 110 tests, stdlib only (node/jsdom for the extension)
-├── tests/extension/core.test.js     # 17 node tests: URL parsing and ranking
-├── tests/extension/ui.test.js       # 12 jsdom tests: rows, keyboard, cleanup, no HTML injection
+├── tests/test_repo.py               # 112 tests, stdlib only (node/jsdom for the extension)
+├── tests/extension/core.test.js     # 26 node tests: URL parsing, ranking, bookmark tiles
+├── tests/extension/background.test.js  # 7 node tests: toolbar tree, message routing
+├── tests/extension/ui.test.js       # 19 jsdom tests: shelf, folders, rows, keyboard, cleanup
 └── .github/workflows/               # validate-configs.yml, release-installers.yml,
                                      #   build-sheepfox.yml (fork compile, manual)
 ```
@@ -469,14 +470,23 @@ add-ons get no access to the browser chrome, so `userChrome.css` is the only mec
 float *Mozilla's own* bar.
 
 `extensions/floating-urlbar/` is the add-on for the case where profile CSS is not available or not
-wanted. Press **`Ctrl+Shift+Space`** (`Command+Shift+Space`) and a pill appears with its own
-results — **open tabs, bookmarks, history and the web** in one list, a typed URL first. It ships its
-own surface instead of touching the chrome: an in-page overlay inside a closed shadow root on normal
-pages, and a small popup window on `about:` pages, `addons.mozilla.org` or the PDF viewer, where
-injection is impossible. The shortcut never silently does nothing.
+wanted. Press **`Ctrl+Shift+Space`** (`Command+Shift+Space`) and a pill appears.
+
+Before you type it is a **bookmark shelf**: your toolbar's bookmarks as tiles, folders opening in
+place with a `← Back` row, titles wrapping to two lines, chip colours hashed from the host so they
+never change between reloads. Type, and it becomes one list — **open tabs, bookmarks, history and
+the web**, a typed URL first. Clicking outside it hides it, and `Esc` steps out of a folder before
+it closes.
+
+It ships its own surface instead of touching the chrome: an in-page overlay inside a closed shadow
+root on normal pages, and a small popup window on `about:` pages, `addons.mozilla.org` or the PDF
+viewer, where injection is impossible. The shortcut never silently does nothing. Tiles are letters
+rather than favicons on purpose: Firefox exposes no favicon API for bookmarks, and asking a favicon
+service would leak your bookmark list to it.
 
 | | |
 | :--- | :--- |
+| **Empty state** | bookmark-toolbar shelf: tiles, folders in place, `← Back`, click-outside to hide |
 | **Shortcut** | `Ctrl+Shift+Space` (remappable in `about:addons` → gear → *Manage Extension Shortcuts*) |
 | **Permissions** | `activeTab`, `scripting`, `tabs`, `history`, `bookmarks`, `search` — no host permissions, no `content_scripts` |
 | **Network** | none: no telemetry, no analytics, no search suggestions, no remote code |
@@ -501,8 +511,9 @@ The extension's own tests need node; the DOM ones also need the optional jsdom h
 
 ```bash
 npm install --prefix tests/extension   # once; without it the DOM tests skip cleanly
-node tests/extension/core.test.js      # 17 tests: URL parsing, ranking, row cap
-node tests/extension/ui.test.js        # 12 tests: rendering, keyboard, ARIA, cleanup
+node tests/extension/core.test.js      # 26 tests: URL parsing, ranking, row cap, bookmark tiles
+node tests/extension/background.test.js # 7 tests: toolbar tree, query pipeline, routing
+node tests/extension/ui.test.js        # 19 tests: shelf, folders, rendering, keyboard, ARIA
 ```
 
 Full details, the permission rationale and the design notes are in
@@ -515,7 +526,7 @@ Full details, the permission rationale and the design notes are in
 ```bash
 make build-configs     # regenerate user.js + sheepfox.cfg from config/modules/*.js
 make check             # fail if either generated file is stale
-make test              # 110 tests (stdlib unittest + node/jsdom for the extension)
+make test              # 112 tests (stdlib unittest + node/jsdom for the extension)
 make extension-check   # validate the extension manifest and sources
 make verify            # check + extension-check + test
 ```

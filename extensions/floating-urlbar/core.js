@@ -15,6 +15,9 @@
   //: scannable without reading.
   const MAX_ROWS = 8;
 
+  //: How many bookmark tiles the grid will render before it just scrolls.
+  const MAX_TILES = 60;
+
   //: Schemes a launcher may open. `javascript:` and `data:` are deliberately
   //: absent: a URL can arrive from a paste, and a launcher must never execute
   //: what it was handed.
@@ -127,6 +130,75 @@
     return 0;
   }
 
+  /* ------------------------------------------------------------------ */
+  /* bookmark grid                                                       */
+  /* ------------------------------------------------------------------ */
+
+  function hostOf(url) {
+    try {
+      return new URL(url).hostname.replace(/^www\./i, "");
+    } catch (error) {
+      return "";
+    }
+  }
+
+  /**
+   * Deterministic 0-359 hue for a string.
+   *
+   * Tiles need a colour, and a fixed palette would either need curating or look
+   * random between reloads. Hashing the host means github.com is always the same
+   * colour on every machine, with no state and no flicker.
+   */
+  function hueOf(text) {
+    const value = String(text || "");
+    let hash = 0;
+    for (let index = 0; index < value.length; index += 1) {
+      hash = (hash * 31 + value.charCodeAt(index)) % 360000;
+    }
+    return hash % 360;
+  }
+
+  function initialOf(title, host) {
+    const source = String(title || host || "").trim();
+    const characters = Array.from(source);
+    return characters.length ? characters[0].toUpperCase() : "?";
+  }
+
+  /**
+   * Shape Firefox bookmark nodes into grid tiles.
+   *
+   * Firefox returns separators as nodes too, and a bookmark with no title is
+   * common; both would render as blank squares if passed straight through.
+   * Firefox's own order is kept: the toolbar is arranged by hand.
+   */
+  function toGridItems(nodes) {
+    const items = [];
+    for (const node of nodes || []) {
+      if (items.length >= MAX_TILES) break;
+      if (!node || node.type === "separator") continue;
+      const isFolder = node.type === "folder";
+      const host = isFolder ? "" : hostOf(node.url);
+      const title = String(node.title || "").trim() || (isFolder ? "Folder" : host || "Bookmark");
+      items.push({
+        id: node.id,
+        kind: isFolder ? "folder" : "bookmark",
+        title: title,
+        url: isFolder ? "" : String(node.url || ""),
+        subtitle: isFolder ? "Folder" : host,
+        host: host,
+        // Firefox does not expose favicons for bookmark nodes, so this is
+        // usually empty and the tile falls back to a letter. When a node does
+        // carry one it is used as-is — never fetched from a favicon service,
+        // because asking a third party about a bookmark is a leak.
+        favicon: isFolder ? "" : String(node.faviconUrl || ""),
+        initial: initialOf(title, host),
+        hue: hueOf(host || title),
+        childCount: isFolder && node.children ? node.children.length : 0,
+      });
+    }
+    return items;
+  }
+
   function toRows(rows) {
     const seen = new Set();
     const result = [];
@@ -213,6 +285,11 @@
 
   const api = {
     MAX_ROWS: MAX_ROWS,
+    MAX_TILES: MAX_TILES,
+    hostOf: hostOf,
+    hueOf: hueOf,
+    initialOf: initialOf,
+    toGridItems: toGridItems,
     OPENABLE_SCHEMES: OPENABLE_SCHEMES.slice(),
     interpretAsUrl: interpretAsUrl,
     scoreMatch: scoreMatch,

@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "(SheepFox) Floating URL Bar",
   "short_name": "SheepFox Bar",
-  "version": "1.0.0",
-  "description": "An Arc/Zen-style floating address bar over any page. Ctrl+Shift+Space, type, Enter.",
+  "version": "1.1.0",
+  "description": "Arc/Zen-style floating address bar with a bookmark shelf over any page. Ctrl+Shift+Space, type, Enter.",
   "author": "SheepFox",
   "homepage_url": "https://github.com/ineednotitle/SheepFox",
   "browser_specific_settings": {
@@ -16,9 +16,19 @@
     "48": "icons/bar.svg",
     "96": "icons/bar.svg"
   },
-  "permissions": ["activeTab", "scripting", "tabs", "history", "bookmarks", "search"],
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "tabs",
+    "history",
+    "bookmarks",
+    "search"
+  ],
   "background": {
-    "scripts": ["core.js", "background.js"]
+    "scripts": [
+      "core.js",
+      "background.js"
+    ]
   },
   "action": {
     "default_title": "Floating address bar (Ctrl+Shift+Space)",

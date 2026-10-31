@@ -6,12 +6,19 @@
  *   overlay  — mounted into a closed shadow root on top of the page
  *   window   — the popup window the extension opens when a page cannot host it
  *
+ * Two views live in the same card:
+ *   grid — the empty state: your bookmarks-toolbar items as tiles, folders open
+ *          in place with a Back row (Arc's bookmark shelf, Zen's empty page)
+ *   list — what you get while typing: address, open tabs, bookmarks, history,
+ *          then the web search
+ *
  * All it needs from the environment is `browser.runtime.sendMessage`; all the
  * data comes from background.js, so history/bookmark/tab access stays in one
  * privileged place and the content-script surface never has to ask for it.
  *
- * Every string that comes from a page (a tab title, a bookmark title) is set
- * with textContent — never innerHTML — because those are page-controlled.
+ * Every string that comes from a page or a bookmark (a tab title, a bookmark
+ * name) is set with textContent — never innerHTML — because those are
+ * page-controlled.
  */
 
 (function (root) {
@@ -31,6 +38,8 @@
     tab: ["M4.5 6.5h15v11h-15Z", "M4.5 10h15"],
     bookmark: ["m12 4.4 2.3 4.7 5.2.8-3.7 3.6.9 5.1-4.7-2.4-4.7 2.4.9-5.1L4.5 9.9l5.2-.8Z"],
     history: ["M12 7.2V12l3.1 1.9", "M3.8 12a8.2 8.2 0 1 0 2.5-5.9L3.8 8.6", "M3.8 4.4v4.2h4.2"],
+    folder: ["M3.5 7.5a2 2 0 0 1 2-2h3.3l1.8 2.2h7.9a2 2 0 0 1 2 2v7.8a2 2 0 0 1-2 2H5.5a2 2 0 0 1-2-2Z"],
+    back: ["M14.5 6.5 9 12l5.5 5.5"],
   };
 
   function element(doc, tag, attributes, text) {
@@ -87,9 +96,12 @@
     const onHeight = typeof settings.onHeight === "function" ? settings.onHeight : null;
     const placeholder = settings.placeholder || "Search or enter an address";
 
-    let rows = [];
-    let rowNodes = [];
+    let view = "grid";
+    let options_ = [];
+    let optionNodes = [];
     let selected = -1;
+    let folderStack = [];
+    let folder = { id: null, title: "" };
     let sequence = 0;
     let timer = null;
     let destroyed = false;
@@ -116,17 +128,25 @@
       spellcheck: "false",
       "aria-autocomplete": "list",
       "aria-expanded": "false",
-      "aria-controls": "sheepfox-list",
+      "aria-controls": "sheepfox-grid",
       "aria-label": "Address or search",
       placeholder: placeholder,
     });
 
     const key = element(doc, "kbd", { class: "sheepfox-key", "aria-hidden": "true" }, "esc");
+
+    const crumb = element(doc, "div", { class: "sheepfox-crumb" });
+    const back = element(doc, "button", { class: "sheepfox-back", type: "button" });
+    back.appendChild(icon(doc, "back", "sheepfox-back-glyph"));
+    back.appendChild(element(doc, "span", null, "Back"));
+    const crumbLabel = element(doc, "span", { class: "sheepfox-crumb-label" });
+    crumb.appendChild(back);
+    crumb.appendChild(crumbLabel);
+
+    const grid = element(doc, "div", { class: "sheepfox-grid", id: "sheepfox-grid", role: "listbox", "aria-label": "Bookmarks" });
     const list = element(doc, "ul", { class: "sheepfox-list", id: "sheepfox-list", role: "listbox", "aria-label": "Results" });
+
     const footer = element(doc, "div", { class: "sheepfox-footer", "aria-hidden": "true" });
-    footer.appendChild(element(doc, "span", null, "↑ ↓ to move"));
-    footer.appendChild(element(doc, "span", null, "↵ to open"));
-    footer.appendChild(element(doc, "span", null, mode === "window" ? "⌘/Ctrl ↵ new tab" : "⇧↵ new tab"));
 
     const backdrop = mode === "overlay" ? element(doc, "div", { class: "sheepfox-backdrop" }) : null;
     if (backdrop) {
@@ -140,6 +160,8 @@
     field.appendChild(input);
     field.appendChild(key);
     card.appendChild(field);
+    card.appendChild(crumb);
+    card.appendChild(grid);
     card.appendChild(list);
     card.appendChild(footer);
     bar.appendChild(card);
@@ -148,6 +170,11 @@
     if (backdrop) fragment.appendChild(backdrop);
     fragment.appendChild(bar);
     container.appendChild(fragment);
+    measure();
+
+    /* ---------------------------------------------------------------- */
+    /* layout helpers                                                    */
+    /* ---------------------------------------------------------------- */
 
     function measure() {
       if (!onHeight || destroyed) return;
@@ -155,63 +182,188 @@
       if (height > 0) onHeight(height);
     }
 
+    function columns() {
+      if (view !== "grid" || typeof root.getComputedStyle !== "function") return 1;
+      const template = root.getComputedStyle(grid).gridTemplateColumns || "";
+      const count = template.split(" ").filter(Boolean).length;
+      return count > 0 ? count : 1;
+    }
+
+    function setFooter() {
+      footer.textContent = "";
+      const hints =
+        view === "grid"
+          ? folderStack.length
+            ? ["← back", "↵ open", "esc back"]
+            : ["↑ ↓ ← → move", "↵ open", "type to search"]
+          : ["↑ ↓ move", "↵ open", mode === "window" ? "⌘/Ctrl ↵ new tab" : "⇧↵ new tab"];
+      for (const hint of hints) footer.appendChild(element(doc, "span", null, hint));
+    }
+
+    function setView(next) {
+      view = next;
+      const isGrid = view === "grid";
+      grid.hidden = !isGrid;
+      list.hidden = isGrid;
+      crumb.hidden = !isGrid || folderStack.length === 0;
+      input.setAttribute("aria-controls", isGrid ? "sheepfox-grid" : "sheepfox-list");
+      setFooter();
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* selection                                                         */
+    /* ---------------------------------------------------------------- */
+
     function setSelected(index) {
-      if (!rows.length) {
+      if (!options_.length) {
         selected = -1;
         input.removeAttribute("aria-activedescendant");
         return;
       }
-      const count = rows.length;
+      const count = options_.length;
       selected = ((index % count) + count) % count;
-      for (let position = 0; position < rowNodes.length; position += 1) {
-        rowNodes[position].setAttribute("aria-selected", position === selected ? "true" : "false");
+      for (let position = 0; position < optionNodes.length; position += 1) {
+        optionNodes[position].setAttribute("aria-selected", position === selected ? "true" : "false");
       }
-      const active = rowNodes[selected];
+      const active = optionNodes[selected];
       if (!active) return;
       input.setAttribute("aria-activedescendant", active.id);
       active.scrollIntoView({ block: "nearest" });
     }
 
-    function render(nextRows) {
-      rows = Array.isArray(nextRows) ? nextRows : [];
-      rowNodes = [];
-      list.textContent = "";
-      const fragmentRows = doc.createDocumentFragment();
+    /* ---------------------------------------------------------------- */
+    /* rendering                                                         */
+    /* ---------------------------------------------------------------- */
 
-      rows.forEach(function (row, index) {
-        const item = element(doc, "li", {
-          class: "sheepfox-row",
-          role: "option",
-          id: row.id || "sheepfox-row-" + index,
-          "aria-selected": "false",
-        });
-        item.appendChild(icon(doc, row.kind, "sheepfox-row-glyph"));
-
-        const cell = element(doc, "div", { class: "sheepfox-row-text" });
-        cell.appendChild(element(doc, "span", { class: "sheepfox-title" }, row.title || ""));
-        cell.appendChild(element(doc, "span", { class: "sheepfox-subtitle" }, row.subtitle || ""));
-        item.appendChild(cell);
-
-        // mousedown, not click: the window surface loses focus on blur, and a
-        // click that lands after a blur would be swallowed by the closing bar.
-        item.addEventListener("mousedown", function (event) {
-          if (event.button !== 0) return;
-          event.preventDefault();
-          setSelected(index);
-          void openSelected(event.ctrlKey || event.metaKey || event.shiftKey);
-        });
-        item.addEventListener("mouseenter", function () {
-          setSelected(index);
-        });
-
-        fragmentRows.appendChild(item);
-        rowNodes.push(item);
+    function tile(item, index) {
+      const node = element(doc, "div", {
+        class: "sheepfox-tile",
+        role: "option",
+        id: item.id || "sheepfox-tile-" + index,
+        "aria-selected": "false",
+        title: item.url || item.title || "",
       });
 
-      list.appendChild(fragmentRows);
-      input.setAttribute("aria-expanded", rows.length ? "true" : "false");
-      setSelected(rows.length ? 0 : -1);
+      const glyphNode = element(doc, "span", { class: "sheepfox-tile-glyph", "aria-hidden": "true" });
+      if (item.kind === "folder") {
+        glyphNode.appendChild(icon(doc, "folder", "sheepfox-tile-icon"));
+        glyphNode.classList.add("sheepfox-tile-glyph--folder");
+      } else {
+        glyphNode.textContent = item.initial || "?";
+        glyphNode.style.setProperty("--sf-tile-hue", String(item.hue || 0));
+        if (item.favicon) {
+          // The letter stays underneath: if the icon 404s or the page's CSP
+          // blocks it, removing the image leaves a usable tile rather than a
+          // blank one.
+          const image = element(doc, "img", {
+            class: "sheepfox-tile-img",
+            src: item.favicon,
+            alt: "",
+            loading: "lazy",
+            referrerpolicy: "no-referrer",
+          });
+          image.addEventListener("error", function () {
+            image.remove();
+          });
+          glyphNode.appendChild(image);
+        }
+      }
+      node.appendChild(glyphNode);
+      node.appendChild(element(doc, "span", { class: "sheepfox-tile-title" }, item.title || ""));
+      if (item.kind === "folder" && item.childCount) {
+        node.appendChild(element(doc, "span", { class: "sheepfox-tile-count" }, String(item.childCount)));
+      }
+      bind(node, index);
+      return node;
+    }
+
+    function row(item, index) {
+      const node = element(doc, "li", {
+        class: "sheepfox-row",
+        role: "option",
+        id: item.id || "sheepfox-row-" + index,
+        "aria-selected": "false",
+        title: item.url || item.title || "",
+      });
+      node.appendChild(icon(doc, item.kind, "sheepfox-row-glyph"));
+
+      const cell = element(doc, "div", { class: "sheepfox-row-text" });
+      cell.appendChild(element(doc, "span", { class: "sheepfox-title" }, item.title || ""));
+      cell.appendChild(element(doc, "span", { class: "sheepfox-subtitle" }, item.subtitle || ""));
+      node.appendChild(cell);
+      bind(node, index);
+      return node;
+    }
+
+    function bind(node, index) {
+      // mousedown, not click: the window surface loses focus on blur, and a
+      // click that lands after a blur would be swallowed by the closing bar.
+      node.addEventListener("mousedown", function (event) {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        setSelected(index);
+        void activate(event.ctrlKey || event.metaKey || event.shiftKey);
+      });
+      node.addEventListener("mouseenter", function () {
+        setSelected(index);
+      });
+    }
+
+    function renderOptions(next, nextView) {
+      options_ = Array.isArray(next) ? next : [];
+      optionNodes = [];
+      setView(nextView || view);
+
+      const host = view === "grid" ? grid : list;
+      // Empty both: a hidden list must not keep yesterday's rows around, and
+      // the live region a screen reader reads is whichever one is visible.
+      grid.textContent = "";
+      list.textContent = "";
+      const batch = doc.createDocumentFragment();
+
+      optionNodes = options_.map(function (item, index) {
+        const node = view === "grid" ? tile(item, index) : row(item, index);
+        batch.appendChild(node);
+        return node;
+      });
+
+      host.appendChild(batch);
+
+      input.setAttribute("aria-expanded", options_.length ? "true" : "false");
+      if (!options_.length) {
+        host.appendChild(
+          element(
+            doc,
+            view === "grid" ? "p" : "li",
+            { class: "sheepfox-empty", role: "presentation" },
+            view === "grid" ? "No bookmarks in your toolbar yet." : "No matches."
+          )
+        );
+      }
       measure();
+      setSelected(options_.length ? 0 : -1);
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* data                                                              */
+    /* ---------------------------------------------------------------- */
+
+    async function loadBookmarks(folderId) {
+      const mine = (sequence += 1);
+      setView("grid");
+      try {
+        const payload = await api.runtime.sendMessage({ type: "sheepfox-bookmarks", folderId: folderId || null });
+        if (destroyed || mine !== sequence) return;
+        folder = {
+          id: payload && payload.folderId ? payload.folderId : null,
+          title: (payload && payload.title) || "Bookmarks",
+        };
+        crumbLabel.textContent = folder.title;
+        renderOptions((payload && payload.items) || [], "grid");
+      } catch (error) {
+        if (destroyed || mine !== sequence) return;
+        renderOptions([], "grid");
+      }
     }
 
     async function runQuery(text) {
@@ -219,9 +371,9 @@
       try {
         const response = await api.runtime.sendMessage({ type: "sheepfox-query", text: text });
         if (destroyed || mine !== sequence) return; // a newer keystroke already answered
-        render(response && response.rows);
+        renderOptions((response && response.rows) || [], "list");
       } catch (error) {
-        if (!destroyed && mine === sequence) render([]);
+        if (!destroyed && mine === sequence) renderOptions([], "list");
       }
     }
 
@@ -233,13 +385,32 @@
       }, 70);
     }
 
-    async function openSelected(newTab) {
-      const row = rows[selected];
-      if (!row) return;
+    /* ---------------------------------------------------------------- */
+    /* actions                                                           */
+    /* ---------------------------------------------------------------- */
+
+    function openFolder(item) {
+      folderStack.push({ id: folder.id, title: folder.title });
+      void loadBookmarks(item.id);
+    }
+
+    function goBack() {
+      if (!folderStack.length) return false;
+      const previous = folderStack.pop();
+      void loadBookmarks(previous ? previous.id : null);
+      return true;
+    }
+
+    async function openItem(item, newTab) {
+      if (!item) return;
+      if (item.kind === "folder") {
+        openFolder(item);
+        return;
+      }
       try {
         await api.runtime.sendMessage({
           type: "sheepfox-open",
-          row: row,
+          row: item,
           options: {
             newTab: Boolean(newTab),
             targetTabId: target.tabId || null,
@@ -254,26 +425,45 @@
       close();
     }
 
+    function activate(newTab) {
+      return openItem(options_[selected], newTab);
+    }
+
+    /* ---------------------------------------------------------------- */
+    /* events                                                            */
+    /* ---------------------------------------------------------------- */
+
     function onKeyDown(event) {
+      const step = view === "grid" ? columns() : 1;
       switch (event.key) {
         case "ArrowDown":
           event.preventDefault();
-          setSelected(selected + 1);
+          setSelected(selected + step);
           break;
         case "ArrowUp":
+          event.preventDefault();
+          setSelected(selected - step);
+          break;
+        case "ArrowRight":
+          if (view !== "grid") break;
+          event.preventDefault();
+          setSelected(selected + 1);
+          break;
+        case "ArrowLeft":
+          if (view !== "grid") break;
           event.preventDefault();
           setSelected(selected - 1);
           break;
         case "Home":
-          if (rows.length) {
+          if (options_.length) {
             event.preventDefault();
             setSelected(0);
           }
           break;
         case "End":
-          if (rows.length) {
+          if (options_.length) {
             event.preventDefault();
-            setSelected(rows.length - 1);
+            setSelected(options_.length - 1);
           }
           break;
         case "Tab":
@@ -282,17 +472,43 @@
           break;
         case "Enter":
           event.preventDefault();
-          void openSelected(event.ctrlKey || event.metaKey || event.shiftKey);
+          void activate(event.ctrlKey || event.metaKey || event.shiftKey);
           break;
         case "Escape":
           event.preventDefault();
           event.stopPropagation();
+          // Inside a folder, Escape means "up one level", not "throw it away".
+          if (view === "grid" && goBack()) break;
           close();
+          break;
+        case "Backspace":
+          // Only when the field is already empty: "up" without reaching for Esc.
+          if (view === "grid" && !input.value && goBack()) event.preventDefault();
           break;
         default:
           break;
       }
     }
+
+    function onInput() {
+      if (!input.value.trim()) {
+        root.clearTimeout(timer);
+        void loadBookmarks(folder.id);
+        return;
+      }
+      scheduleQuery();
+    }
+
+    back.addEventListener("mousedown", function (event) {
+      event.preventDefault();
+      goBack();
+    });
+
+    input.addEventListener("keydown", onKeyDown);
+    input.addEventListener("input", onInput);
+    input.addEventListener("paste", function () {
+      root.setTimeout(onInput, 0);
+    });
 
     function destroy() {
       if (destroyed) return;
@@ -308,14 +524,10 @@
       onClose();
     }
 
-    input.addEventListener("keydown", onKeyDown);
-    input.addEventListener("input", scheduleQuery);
-    input.addEventListener("paste", function () {
-      root.setTimeout(scheduleQuery, 0);
-    });
-
-    // Start empty: the pill opens as a pill, not a form.
-    render([]);
+    // Open on the bookmark grid: the pill shows your shelf before you type.
+    setView("grid");
+    setFooter();
+    void loadBookmarks(null);
 
     return {
       element: bar,

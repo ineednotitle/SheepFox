@@ -61,6 +61,7 @@ jobs:
           python3 mozbuild/scripts/build-extension.py --out "${RUNNER_TEMP}/xpi"
           node --version
           node tests/extension/core.test.js
+          node tests/extension/background.test.js
 
       - name: Install the optional jsdom harness for the extension UI tests
         run: npm install --prefix tests/extension --silent || echo "::warning::jsdom unavailable; DOM tests will be skipped"

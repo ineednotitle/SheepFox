@@ -17,6 +17,9 @@ const WINDOW_MARGIN = 96;
 //: Injected into the tab on demand, in this order.
 const OVERLAY_FILES = ["styles.js", "ui.js", "content.js"];
 
+//: Firefox's fixed id for the Bookmarks Toolbar root.
+const BOOKMARKS_TOOLBAR = "toolbar_____";
+
 let cachedEngineName = null;
 
 /* ------------------------------------------------------------------ */
@@ -90,6 +93,37 @@ async function handleQuery(text) {
   candidates.engineName = engineName;
 
   return { rows: core.rank(query, candidates), engine: engineName };
+}
+
+/* ------------------------------------------------------------------ */
+/* bookmark grid                                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One level of the bookmarks toolbar, for the empty-state grid.
+ *
+ * No folder id means the toolbar root. Everything the grid renders is shaped by
+ * core.toGridItems, so separators and untitled bookmarks are handled (and
+ * tested) in one place rather than in the view.
+ */
+async function bookmarkLevel(folderId) {
+  const id = folderId || BOOKMARKS_TOOLBAR;
+  const subtree = await attempt(function () {
+    return browser.bookmarks.getSubTree(id);
+  }, null);
+
+  const folder = subtree && subtree[0] ? subtree[0] : null;
+  if (!folder) {
+    return { folderId: null, title: "Bookmarks", parentId: null, atRoot: true, items: [] };
+  }
+
+  return {
+    folderId: folder.id,
+    title: folder.title || "Bookmarks",
+    parentId: folder.parentId || null,
+    atRoot: !folderId,
+    items: core.toGridItems(folder.children || []),
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -261,6 +295,8 @@ browser.runtime.onMessage.addListener(function (message, sender) {
       return handleQuery(message.text);
     case "sheepfox-open":
       return openRow(message.row, message.options, sender);
+    case "sheepfox-bookmarks":
+      return bookmarkLevel(message.folderId);
     case "sheepfox-fallback":
       // The page refused the overlay (mount threw): show the window instead.
       // Deliberately not openBar(), which would inject again and loop.
