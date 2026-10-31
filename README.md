@@ -110,8 +110,8 @@ SheepFox/
 │
 ├── scripts/                         # install.py, install-unix.sh, install-windows.{bat,ps1}
 ├── tests/test_repo.py               # 90 tests, stdlib only
-└── .github/workflows/               # validate-configs.yml, build-sheepfox.yml,
-                                     #   release-installers.yml
+└── .github/workflows/               # validate-configs.yml, release-installers.yml,
+                                     #   build-sheepfox.yml (fork compile, manual)
 ```
 
 ---

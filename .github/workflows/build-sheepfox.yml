@@ -1,6 +1,8 @@
 name: Build SheepFox
 
 on:
+  # A tag publishes the drop-in artifacts (release-installers.yml). The fork
+  # compile below needs ~40 GB and hours, so it is manual, never automatic.
   push:
     tags: ["v*"]
   workflow_dispatch:
@@ -59,7 +61,7 @@ jobs:
   build-linux-x86_64:
     name: Compile SheepFox (Linux x86_64)
     needs: config-package
-    if: github.event_name == 'push' || !inputs.skip_browser
+    if: github.event_name == 'workflow_dispatch' && !inputs.skip_browser
     runs-on: ubuntu-22.04
     timeout-minutes: 480
     steps:
