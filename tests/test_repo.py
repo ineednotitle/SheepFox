@@ -28,6 +28,7 @@ import sys
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
+import zipfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -387,6 +388,203 @@ class TestNoBrowserUiCustomisation(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, msg=result.stdout)
             self.assertIn("retired search-bar theme", result.stdout)
+
+
+class TestFloatingUrlBarExtension(unittest.TestCase):
+    """The optional floating address-bar WebExtension.
+
+    It is a WebExtension because it has to be: an extension cannot touch the
+    browser chrome, so this ships as its own surface (in-page overlay + popup
+    window) instead of profile CSS.
+    """
+
+    EXT = REPO_ROOT / "extensions" / "floating-urlbar"
+    MANIFEST = EXT / "manifest.json"
+    BUILD = REPO_ROOT / "mozbuild" / "scripts" / "build-extension.py"
+    NODE = shutil.which("node")
+
+    def setUp(self) -> None:
+        if not self.MANIFEST.is_file():
+            self.fail("extensions/floating-urlbar/manifest.json is missing")
+        self.manifest = json.loads(read(self.MANIFEST))
+
+    def test_manifest_is_a_valid_gecko_mv3_addon(self) -> None:
+        self.assertEqual(self.manifest["manifest_version"], 3)
+        self.assertRegex(self.manifest["version"], r"^\d+\.\d+\.\d+$")
+        self.assertIn("SheepFox", self.manifest["name"])
+        gecko = self.manifest["browser_specific_settings"]["gecko"]
+        self.assertIn("@", gecko["id"])
+        self.assertGreaterEqual(int(gecko["strict_min_version"].split(".")[0]), 115)
+        self.assertIn("open-floating-bar", self.manifest["commands"])
+        self.assertTrue(self.manifest["commands"]["open-floating-bar"]["suggested_key"]["default"])
+
+    def test_it_asks_for_no_more_access_than_it_needs(self) -> None:
+        permissions = set(self.manifest["permissions"])
+        self.assertEqual(
+            permissions,
+            {"activeTab", "scripting", "tabs", "history", "bookmarks", "search"},
+        )
+        # Nothing on page load, and no blanket host access.
+        self.assertNotIn("content_scripts", self.manifest)
+        self.assertNotIn("host_permissions", self.manifest)
+        self.assertNotIn("<all_urls>", read(self.MANIFEST))
+
+    def test_every_referenced_file_exists(self) -> None:
+        for relative in list(self.manifest["icons"].values()) + list(self.manifest["background"]["scripts"]):
+            self.assertTrue((self.EXT / relative).is_file(), msg=f"missing {relative}")
+        for relative in self.manifest["action"]["default_icon"].values():
+            self.assertTrue((self.EXT / relative).is_file(), msg=f"missing {relative}")
+        html = read(self.EXT / "search.html")
+        scripts = re.findall(r'<script src="([^"]+)"', html)
+        self.assertEqual(scripts, ["styles.js", "ui.js", "window.js"])
+        for script in scripts:
+            self.assertTrue((self.EXT / script).is_file(), msg=f"missing {script}")
+
+    def test_no_remote_code_or_resources(self) -> None:
+        """A launcher that pulls a CDN script is a launcher that can be replaced."""
+        for path in sorted(self.EXT.rglob("*")):
+            if path.suffix not in {".js", ".html"}:
+                continue
+            text = read(path)
+            self.assertNotRegex(text, r"""(?:src|href)\s*=\s*["']https?://""", msg=path.name)
+            self.assertNotIn("eval(", text, msg=path.name)
+
+    def test_markup_uses_text_content_not_inner_html(self) -> None:
+        """Tab titles and bookmark titles are page-controlled strings."""
+        ui = read(self.EXT / "ui.js")
+        self.assertNotRegex(ui, r"\.innerHTML\s*=", msg="page titles must never be injected as markup")
+        self.assertNotRegex(ui, r"insertAdjacentHTML")
+        self.assertIn("textContent", ui)
+
+    def test_accessibility_and_theme_support(self) -> None:
+        ui = read(self.EXT / "ui.js")
+        self.assertIn('role: "combobox"', ui)
+        self.assertIn('role: "listbox"', ui)
+        self.assertIn("aria-activedescendant", ui)
+        self.assertIn('"aria-selected"', ui)
+        styles = read(self.EXT / "styles.js")
+        self.assertIn("prefers-reduced-motion", styles)
+        self.assertIn("forced-colors: active", styles)
+        self.assertIn("prefers-color-scheme: light", styles)
+        # The removed focus ring has to be replaced by something visible.
+        self.assertIn(":focus-within", styles)
+
+    def test_stylesheet_is_valid_css(self) -> None:
+        spec = importlib.util.find_spec("tinycss2")
+        if spec is None:  # pragma: no cover - tinycss2 is a dev requirement
+            self.skipTest("tinycss2 is not installed")
+        tinycss2 = importlib.import_module("tinycss2")
+        source = read(self.EXT / "styles.js")
+        match = re.search(r"root\.SHEEPFOX_BAR_CSS\s*=\s*`(.*?)`;", source, re.S)
+        self.assertIsNotNone(match, "styles.js must export SHEEPFOX_BAR_CSS in a template literal")
+        css = match.group(1)
+        rules = [
+            rule
+            for rule in tinycss2.parse_stylesheet(css, skip_whitespace=True, skip_comments=True)
+            if rule.type in {"qualified-rule", "at-rule"}
+        ]
+        self.assertGreater(len(rules), 10)
+        self.assertEqual(css.count("{"), css.count("}"))
+
+    def test_javascript_parses(self) -> None:
+        if not self.NODE:  # pragma: no cover - node is present in CI
+            self.skipTest("node is not installed")
+        for path in sorted(self.EXT.glob("*.js")):
+            result = subprocess.run(
+                [self.NODE, "--check", str(path)], capture_output=True, text=True, check=False
+            )
+            self.assertEqual(result.returncode, 0, msg=f"{path.name}: {result.stderr}")
+
+    def test_core_logic_passes_its_unit_tests(self) -> None:
+        if not self.NODE:  # pragma: no cover
+            self.skipTest("node is not installed")
+        result = subprocess.run(
+            [self.NODE, str(REPO_ROOT / "tests" / "extension" / "core.test.js")],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
+        self.assertIn("ok", result.stdout)
+
+    def test_ui_behaviour_in_a_dom(self) -> None:
+        """Render the bar under jsdom: rows, keyboard, cleanup, text-not-HTML."""
+        if not self.NODE:  # pragma: no cover
+            self.skipTest("node is not installed")
+        result = subprocess.run(
+            [self.NODE, str(REPO_ROOT / "tests" / "extension" / "ui.test.js")],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if "skipped" in result.stdout:
+            self.skipTest("jsdom is not installed (npm install --prefix tests/extension)")
+        self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
+        self.assertIn("ok —", result.stdout)
+
+    def test_build_script_validates_and_packages(self) -> None:
+        check = subprocess.run(
+            [sys.executable, str(self.BUILD), "--check"], capture_output=True, text=True, check=False
+        )
+        self.assertEqual(check.returncode, 0, msg=check.stdout + check.stderr)
+        self.assertIn("MV3", check.stdout)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            build = subprocess.run(
+                [sys.executable, str(self.BUILD), "--out", tmp],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(build.returncode, 0, msg=build.stdout + build.stderr)
+            archive_path = Path(tmp) / f"SheepFox-Floating-URL-Bar-{self.manifest['version']}.xpi"
+            self.assertTrue(archive_path.is_file(), msg=build.stdout)
+            with zipfile.ZipFile(archive_path) as archive:
+                names = archive.namelist()
+                self.assertIn("manifest.json", names)
+                self.assertIn("background.js", names)
+                self.assertIn("icons/bar.svg", names)
+                self.assertTrue(all("../" not in name and not name.startswith("/") for name in names))
+                packed = json.loads(archive.read("manifest.json"))
+                self.assertEqual(packed["version"], self.manifest["version"])
+
+    def test_build_script_rejects_a_tampered_manifest(self) -> None:
+        """The validator has to fail on the things that actually break installs."""
+        with tempfile.TemporaryDirectory() as tmp:
+            copy = Path(tmp) / "ext"
+            shutil.copytree(self.EXT, copy)
+            manifest_path = copy / "manifest.json"
+            manifest = json.loads(read(manifest_path))
+            manifest["content_scripts"] = [{"matches": ["<all_urls>"], "js": ["content.js"]}]
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            broken = Path(tmp) / "repo" / "extensions" / "floating-urlbar"
+            broken.parent.mkdir(parents=True)
+            shutil.copytree(copy, broken)
+            script = Path(tmp) / "repo" / "mozbuild" / "scripts" / "build-extension.py"
+            script.parent.mkdir(parents=True)
+            script.write_bytes(self.BUILD.read_bytes())
+
+            result = subprocess.run(
+                [sys.executable, str(script), "--check"], capture_output=True, text=True, check=False
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("content_scripts", result.stdout + result.stderr)
+
+    def test_release_workflow_ships_the_extension(self) -> None:
+        workflow = read(REPO_ROOT / ".github" / "workflows" / "release-installers.yml")
+        self.assertIn("build-extension.py", workflow)
+        self.assertIn("SheepFox-Floating-URL-Bar-*.xpi", workflow)
+
+    def test_readme_documents_installation_and_limits(self) -> None:
+        readme = read(REPO_ROOT / "README.md")
+        self.assertIn("Floating URL Bar", readme)
+        self.assertIn("Ctrl+Shift+Space", readme)
+        extension_readme = read(self.EXT / "README.md")
+        self.assertIn("about:debugging", extension_readme)
+        self.assertIn("web-ext sign", extension_readme)
+        # The one thing a user must not be misled about.
+        self.assertIn("cannot style Firefox's address bar", extension_readme)
 
 
 class TestPolicies(unittest.TestCase):

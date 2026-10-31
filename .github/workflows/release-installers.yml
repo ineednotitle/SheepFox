@@ -110,10 +110,36 @@ jobs:
           path: dist/SheepFox-*.iso
           if-no-files-found: error
 
+  extension:
+    name: Floating URL Bar .xpi
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate the manifest and package the extension
+        run: |
+          python3 mozbuild/scripts/build-extension.py --check
+          python3 mozbuild/scripts/build-extension.py
+          python3 -c "import glob,json,zipfile; p=glob.glob('dist/SheepFox-Floating-URL-Bar-*.xpi')[0]; z=zipfile.ZipFile(p); m=json.loads(z.read('manifest.json')); assert m['manifest_version']==3 and 'manifest.json' in z.namelist(); print('verified', p)"
+
+      - name: Upload the extension
+        uses: actions/upload-artifact@v4
+        with:
+          name: SheepFox-Extension
+          path: dist/SheepFox-Floating-URL-Bar-*.xpi
+          if-no-files-found: error
+
   publish:
     name: Attach the installers to the release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows, macos, fallback]
+    needs: [windows, macos, fallback, extension]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -131,6 +157,7 @@ jobs:
             artifacts/SheepFox-Setup-*.exe
             artifacts/SheepFox-*.dmg
             artifacts/SheepFox-*.iso
+            artifacts/SheepFox-Floating-URL-Bar-*.xpi
           fail_on_unmatched_files: true
           generate_release_notes: true
           body: |
@@ -158,3 +185,20 @@ jobs:
 
             Every artifact ships the exact files from `config/`; nothing is
             re-implemented inside the installer.
+
+            ### Floating URL Bar extension (optional)
+
+            `SheepFox-Floating-URL-Bar-<version>.xpi` is the optional WebExtension:
+            a floating, Arc/Zen-style address bar on `Ctrl+Shift+Space` with results
+            from your open tabs, bookmarks, history and the web. It is **not** part of
+            the installers - extensions cannot style the browser chrome, and an
+            unsigned `.xpi` cannot be installed permanently in release Firefox.
+
+            * Try it now: `about:debugging#/runtime/this-firefox` -> **Load Temporary
+              Add-on** -> pick the `.xpi`. It stays until Firefox restarts.
+            * Keep it: sign it with your own AMO account
+              (`npx web-ext sign --api-key ... --api-secret ...`), then install the
+              signed `.xpi` normally.
+            * Read `extensions/floating-urlbar/README.md` first: the extension asks
+              for history/bookmarks/tabs access, and it never runs on a page you did
+              not invoke it on.

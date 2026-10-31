@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="color-scheme" content="dark light" />
+    <title>SheepFox bar</title>
+    <!-- Window surface only. The in-page overlay is injected by content.js and
+         never loads this page. No remote resources: no fonts, no scripts, no
+         images, so the bar works offline and leaks nothing. -->
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #111113;
+      }
+
+      @media (prefers-color-scheme: light) {
+        html,
+        body {
+          background: #e9edf2;
+        }
+      }
+    </style>
+    <script src="styles.js"></script>
+  </head>
+  <body>
+    <script src="ui.js"></script>
+    <script src="window.js"></script>
+  </body>
+</html>

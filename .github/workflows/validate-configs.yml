@@ -55,6 +55,16 @@ jobs:
               print(f"json ok: {path}")
           PY
 
+      - name: Validate and package the Floating URL Bar extension
+        run: |
+          python3 mozbuild/scripts/build-extension.py --check
+          python3 mozbuild/scripts/build-extension.py --out "${RUNNER_TEMP}/xpi"
+          node --version
+          node tests/extension/core.test.js
+
+      - name: Install the optional jsdom harness for the extension UI tests
+        run: npm install --prefix tests/extension --silent || echo "::warning::jsdom unavailable; DOM tests will be skipped"
+
       - name: Install optional test helpers
         run: |
           python3 -m pip install --quiet --disable-pip-version-check -r requirements-dev.txt \

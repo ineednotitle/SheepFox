@@ -105,8 +105,18 @@ SheepFox/
 │   ├── windows/launcher.c           # source of SheepFox-Setup-<ver>.exe
 │   └── macos/                       # "Install SheepFox.command" + README.txt
 │
+├── extensions/floating-urlbar/      # the optional Floating URL Bar WebExtension
+│   ├── manifest.json                # MV3, Gecko id floating-urlbar@sheepfox
+│   ├── core.js                      # URL interpretation + ranking (pure, node-tested)
+│   ├── background.js                # shortcut, query pipeline, surface selection
+│   ├── ui.js / styles.js            # shared renderer (ARIA combobox pattern)
+│   ├── content.js / window.js       # in-page overlay / popup-window surface
+│   └── search.html, icons/bar.svg
+│
 ├── scripts/                         # install.py, install-unix.sh, install-windows.{bat,ps1}
-├── tests/test_repo.py               # 82 tests, stdlib only
+├── tests/test_repo.py               # 96 tests, stdlib only (node for the extension)
+├── tests/extension/core.test.js     # 17 node tests: URL parsing and ranking
+├── tests/extension/ui.test.js       # 12 jsdom tests: rows, keyboard, cleanup, no HTML injection
 └── .github/workflows/               # validate-configs.yml, release-installers.yml,
                                      #   build-sheepfox.yml (fork compile, manual)
 ```
@@ -225,6 +235,10 @@ to go wrong for someone who only wanted the speed and privacy prefs.
 Upgrading from 1.2 or older? The installer deletes the leftover `chrome/userChrome.css`,
 `chrome/userContent.css` and `chrome/sheepfox-probe.css` from every profile it touches, and
 `--uninstall` removes them too — `--doctor` prints them if they are still there.
+
+If you still want a floating bar, there is one that is *allowed* to exist:
+[**the Floating URL Bar WebExtension**](#floating-url-bar-optional-extension) below — its own
+overlay on `Ctrl+Shift+Space`, installable and removable like any add-on.
 
 ```bash
 ./scripts/install-unix.sh                  # user.js + SheepShields policy (no UI files)
@@ -362,13 +376,62 @@ Artifacts land in `mozbuild/firefox-src/obj-*/dist/`, with `sheepfox.cfg`,
 
 ---
 
+## Floating URL Bar (optional extension)
+
+`extensions/floating-urlbar/` is a WebExtension that brings the Arc/Zen floating search back —
+*without* profile CSS. Press **`Ctrl+Shift+Space`** (`Command+Shift+Space`) on any page and a pill
+appears, styled like the 1.2 theme, searching your **open tabs, bookmarks, history and the web** in
+one list while a typed URL is the first row.
+
+**Why an extension is not a `userChrome.css` replacement:** a WebExtension cannot touch the browser
+chrome — `#urlbar` is off-limits to add-ons, so no extension can float Mozilla's own bar. This one
+ships its own surface instead: an in-page overlay inside a closed shadow root on normal pages, and a
+small popup window on `about:` pages, `addons.mozilla.org` or the PDF viewer, where injection is
+impossible. The shortcut never silently does nothing.
+
+| | |
+| :--- | :--- |
+| **Shortcut** | `Ctrl+Shift+Space` (remappable in `about:addons` → gear → *Manage Extension Shortcuts*) |
+| **Permissions** | `activeTab`, `scripting`, `tabs`, `history`, `bookmarks`, `search` — no host permissions, no `content_scripts` |
+| **Network** | none: no telemetry, no analytics, no search suggestions, no remote code |
+| **Surfaces** | in-page overlay (closed shadow root, removed on close/navigate) + popup window fallback |
+
+Release Firefox refuses **unsigned** extensions, so the extension is *not* bundled into the
+installers — that would only produce a disabled add-on and a mystery. Two honest ways to run it:
+
+```bash
+# try it now, no signing (lasts until Firefox restarts):
+#   about:debugging#/runtime/this-firefox -> Load Temporary Add-on -> pick the .xpi
+
+make extension          # -> dist/SheepFox-Floating-URL-Bar-<version>.xpi
+make extension-check    # validate the manifest and sources only (CI gate)
+
+# keep it: sign with your own free AMO account, then install normally
+npx web-ext sign --channel unlisted --api-key "$AMO_JWT_ISSUER" \
+  --api-secret "$AMO_JWT_SECRET" --source-dir extensions/floating-urlbar
+```
+
+The extension's own tests need node; the DOM ones also need the optional jsdom harness:
+
+```bash
+npm install --prefix tests/extension   # once; without it the DOM tests skip cleanly
+node tests/extension/core.test.js      # 17 tests: URL parsing, ranking, row cap
+node tests/extension/ui.test.js        # 12 tests: rendering, keyboard, ARIA, cleanup
+```
+
+Full details, the permission rationale and the design notes are in
+[`extensions/floating-urlbar/README.md`](extensions/floating-urlbar/README.md).
+
+---
+
 ## Verification
 
 ```bash
 make build-configs     # regenerate user.js + sheepfox.cfg from config/modules/*.js
 make check             # fail if either generated file is stale
-make test              # 41 tests (stdlib unittest, no dependencies)
-make verify            # check + test
+make test              # 96 tests (stdlib unittest + node/jsdom for the extension)
+make extension-check   # validate the extension manifest and sources
+make verify            # check + extension-check + test
 ```
 
 What the suite enforces:

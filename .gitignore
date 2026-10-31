@@ -43,3 +43,7 @@ desktop.ini
 
 # Installer build output (mozbuild/scripts/build-installers.py)
 dist/
+
+# Optional jsdom harness for tests/extension (npm install --prefix tests/extension)
+node_modules/
+tests/extension/package-lock.json

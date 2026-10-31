@@ -8,7 +8,7 @@ TARGET ?= auto
 SHEEPFOX_SRC ?= $(CURDIR)/mozbuild/firefox-src
 
 .PHONY: help build-configs check test test-verbose install install-dry-run \
-        installers installers-windows installers-macos \
+        installers installers-windows installers-macos extension extension-check \
         fetch-source patch-source build-browser clean verify
 
 help:
@@ -22,6 +22,8 @@ help:
 	@echo "  make install-dry-run Preview every path that would be touched"
 	@echo "  make installers      Build dist/SheepFox-Setup-*.exe + SheepFox-*.dmg + *.iso"
 	@echo "                       (needs: pip install ziglang pycdlib)"
+	@echo "  make extension       Build dist/SheepFox-Floating-URL-Bar-*.xpi"
+	@echo "  make extension-check Validate the extension manifest and sources (CI gate)"
 	@echo ""
 	@echo "Custom fork build (compile (SheepFox) Firefox from upstream source):"
 	@echo "  make fetch-source    Download + SHA-512 verify the pinned Firefox source"
@@ -56,6 +58,12 @@ installers-windows:
 installers-macos:
 	$(PYTHON) mozbuild/scripts/build-installers.py --macos
 
+extension:
+	$(PYTHON) mozbuild/scripts/build-extension.py
+
+extension-check:
+	$(PYTHON) mozbuild/scripts/build-extension.py --check
+
 fetch-source:
 	bash mozbuild/scripts/fetch-source.sh
 
@@ -65,7 +73,7 @@ patch-source:
 build-browser:
 	SHEEPFOX_SRC_DIR=$(SHEEPFOX_SRC) bash mozbuild/scripts/build-browser.sh --target $(TARGET)
 
-verify: check test
+verify: check extension-check test
 	@echo "All SheepFox verification gates passed."
 
 clean:

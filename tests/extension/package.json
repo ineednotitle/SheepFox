@@ -1,0 +1,8 @@
+{
+  "name": "sheepfox-extension-tests",
+  "private": true,
+  "description": "Optional DOM harness for the Floating URL Bar extension tests.",
+  "devDependencies": {
+    "jsdom": "^24.1.3"
+  }
+}
