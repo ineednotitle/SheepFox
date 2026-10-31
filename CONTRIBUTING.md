@@ -1,9 +1,9 @@
-# Contributing to (SheepFox) Firefox
+# Contributing to (SheepFox) Zen browser
 
-Thank you for helping make **(SheepFox) Firefox** faster and more private! Every contribution must uphold our three core engineering invariants:
+Thank you for helping make **(SheepFox) Zen browser** faster and more private! Every contribution must uphold our three core engineering invariants:
 
 1. **Speed Without Instability:** Prefer documented Gecko/WebRender/Necko optimizations (`gfx.webrender.*`, HTTP/3, RAM caching, compiler LTO/PGO). Never force unstable graphics flags that crash older GPU drivers, and never disable the GPU crash-isolation process (`layers.gpu-process.enabled`).
-2. **Privacy Without Breakage:** Default configurations (`01-speedfox.js` through `04-smoothfox.js`) must not break WebGL, high-refresh-rate monitors (120Hz+), dark mode, timezones, or standard OAuth/SSO flows. High-breakage hardening belongs in `config/overrides/strict-paranoia.override.js`.
+2. **Privacy Without Breakage:** Default configurations (`01-speedfox.js` through `04-smoothfox.js`) must not break Zen Browser features (Workspaces, Compact Mode, Glance, Split View, Mica/vibrancy backdrops), WebGL, high-refresh-rate monitors (120Hz+), dark mode, timezones, or standard OAuth/SSO flows. High-breakage hardening belongs in `config/overrides/strict-paranoia.override.js`.
 3. **User Sovereignty (`defaultPref` over `lockPref`):** Only tag a preference with `// @lock` if enabling it transmits telemetry, ad-attribution data, sponsored pings, or unsolicited background studies to remote servers.
 
 ## Workflow for Modifying Preferences
@@ -25,7 +25,7 @@ Thank you for helping make **(SheepFox) Firefox** faster and more private! Every
 
 ## Workflow for Adding Source Patches
 
-1. Format patches as clean unified git diffs (`-p1`) against the upstream version specified in `mozmozbuild/firefox-version.json`.
+1. Format patches as clean unified git diffs (`-p1`) against the upstream version specified in `mozbuild/firefox-version.json`.
 2. Place the `.patch` file in `patches/` with a numbered prefix (`0005-...patch`) and append its filename to `patches/series`.
 3. Run `make test` to validate unified diff hunk line counts and diffstat totals automatically,
    then `make patch-source` against the pinned tree to confirm every patch applies.

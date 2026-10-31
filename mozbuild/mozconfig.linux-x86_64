@@ -1,5 +1,5 @@
 # ============================================================================
-# (SheepFox) Firefox — Linux x86_64 (x86-64-v3 / AVX2 + FMA) release mozconfig
+# (SheepFox) Zen browser — Linux x86_64 (x86-64-v3 / AVX2 + FMA) release mozconfig
 # Requires clang + LLD (Rust cross-language LTO needs clang, not GCC).
 #   ./mach bootstrap   OR   apt install clang lld libgtk-3-dev ...
 # ============================================================================

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ============================================================================
-# (SheepFox) Firefox — build the distributable installers
+# (SheepFox) Zen browser — build the distributable installers
 #
 #   python3 mozbuild/scripts/build-installers.py            # both
 #   python3 mozbuild/scripts/build-installers.py --windows  # .exe only

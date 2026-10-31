@@ -1,8 +1,9 @@
 // ============================================================================
 // MODULE 02: SHIELDFOX — LibreFox-grade privacy + zero-breakage compatibility
-// Goal: eliminate cross-site tracking, telemetry and network leaks while
-//       preserving 120Hz+ displays, hardware WebGL/Canvas, dark mode, timezones
-//       and normal OAuth/SSO flows.
+// Goal: eliminate cross-site tracking, telemetry and network leaks in Zen
+//       Browser (and Firefox) while preserving 120Hz+ displays, Zen Compact
+//       Mode & Mica/vibrancy themes, hardware WebGL/Canvas, dark mode,
+//       timezones, Workspaces and normal OAuth/SSO flows.
 // Lines tagged `// @lock` are promoted to lockPref() in the AutoConfig and can
 // only be changed by editing this module — they are reserved for things that
 // transmit data to remote servers.
@@ -18,6 +19,9 @@ user_pref("privacy.trackingprotection.enabled", true);
 user_pref("privacy.trackingprotection.socialtracking.enabled", true);
 user_pref("privacy.trackingprotection.cryptomining.enabled", true);
 user_pref("privacy.trackingprotection.emailtracking.enabled", true);
+// Keep Contextual Identities enabled so Zen Browser Workspaces & Containers work
+user_pref("privacy.userContext.enabled", true);
+user_pref("privacy.userContext.ui.enabled", true);
 
 // --- Balanced Anti-Fingerprinting (preserves 120Hz+, dark mode & WebGL) ---
 // Strict RFP stays OFF: it caps the refresh rate at 60Hz, forces light mode,

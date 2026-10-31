@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # ============================================================================
-# (SheepFox) Firefox — Linux & macOS Quick Installer Wrapper
+# (SheepFox) Zen browser — Linux & macOS Quick Installer Wrapper
 # Usage:
-#   ./scripts/install-unix.sh             # user.js + floating UI + SheepShields policy
-#                                         #   (the policy preinstalls uBlock Origin and
-#                                         #    Decentraleyes; it asks for sudo once)
-#   sudo ./scripts/install-unix.sh --system    # also the AutoConfig files
+#   ./scripts/install-unix.sh             # user.js + chrome CSS + SheepShields policy
+#                                         #   (targets Zen Browser + Firefox; asks for sudo
+#                                         #    once to preinstall uBlock Origin + Decentraleyes)
+#   sudo ./scripts/install-unix.sh --system    # also install AutoConfig (sheepfox.cfg)
+#   ./scripts/install-unix.sh --browser zen    # target Zen Browser only
 #   ./scripts/install-unix.sh --no-extensions  # policy without the extension preinstall
 # ============================================================================
 set -euo pipefail

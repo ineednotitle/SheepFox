@@ -1,18 +1,21 @@
 #!/bin/bash
 # ============================================================================
-# (SheepFox) Firefox — macOS installer
+# (SheepFox) Zen browser — macOS installer
 #
 # Double-click this file. It runs the same SheepFox installer a git checkout
-# would run, against the Firefox profile(s) in ~/Library/Application Support.
+# would run, against your Zen Browser (and Firefox) profile(s) in
+# ~/Library/Application Support.
 #
 # If macOS refuses to run it ("cannot be opened because it is from an
 # unidentified developer", or the file has no execute bit on a mounted image):
 #   Control-click → Open,  or run:  sh "Install SheepFox.command"
 #
 # macOS will ask for your password once: the SheepShields policy file that
-# preinstalls uBlock Origin + Decentraleyes lives inside Firefox.app.
+# preinstalls uBlock Origin + Decentraleyes lives inside Zen.app /
+# Zen Browser.app (or Firefox.app).
 #
 # Switches are forwarded, so you can also do:
+#   sh "Install SheepFox.command" --browser zen
 #   sh "Install SheepFox.command" --no-extensions
 #   sh "Install SheepFox.command" --system --low-memory
 #   sh "Install SheepFox.command" --doctor
@@ -31,8 +34,8 @@ pause() {
 }
 
 echo ""
-echo "  (SheepFox) Firefox"
-echo "  ------------------"
+echo "  (SheepFox) Zen browser"
+echo "  ----------------------"
 echo ""
 
 if [ ! -d "${PAYLOAD}" ]; then
@@ -51,9 +54,9 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
-FIREFOX_RUNNING="$(pgrep -x firefox || true)"
-if [ -n "${FIREFOX_RUNNING}" ]; then
-  echo "  Firefox is running. Quit it completely before the change takes effect"
+BROWSER_RUNNING="$(pgrep -ix 'zen|firefox' || true)"
+if [ -n "${BROWSER_RUNNING}" ]; then
+  echo "  Zen Browser / Firefox is running. Quit it completely before changes take effect"
   echo "  (config and userChrome.css are only read at startup)."
   echo ""
 fi
@@ -65,8 +68,8 @@ echo ""
 # Called through sh on purpose: a mounted image can lose the execute bit.
 if sh ./scripts/install-unix.sh "$@"; then
   echo ""
-  echo "  Done. Start Firefox, then press Cmd+T."
-  echo "  Floating search pill, privacy prefs and speed prefs are active."
+  echo "  Done. Start Zen Browser (or Firefox)."
+  echo "  Privacy prefs, speed prefs and SheepShields policy are active."
   echo "  uBlock Origin + Decentraleyes install on that first start."
 else
   status=$?

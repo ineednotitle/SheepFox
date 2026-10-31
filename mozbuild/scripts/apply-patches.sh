@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# (SheepFox) Firefox — brand and patch the fetched upstream source tree
+# (SheepFox) Zen browser — brand and patch the fetched upstream source tree
 #
 #   ./mozbuild/scripts/apply-patches.sh [--source DIR] [--no-patches] [--force]
 #

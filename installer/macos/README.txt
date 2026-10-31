@@ -1,30 +1,30 @@
-(SheepFox) Firefox — macOS
-==========================
+(SheepFox) Zen browser — macOS
+==============================
 
 1. Double-click "Install SheepFox.command".
    If macOS blocks it: Control-click it → Open, or open Terminal and run
      sh "/Volumes/SheepFox/Install SheepFox.command"
 
-2. Quit Firefox completely (Cmd+Q; check that no firefox process is left in
-   Activity Monitor), then start it again.
+2. Quit Zen Browser (or Firefox) completely (Cmd+Q; check that no zen / firefox
+   process is left in Activity Monitor), then start it again.
 
-3. Press Cmd+T. You should get the floating search pill; Cmd+L floats it over
-   any page you are already on.
+3. Open a new tab (Cmd+T). Speed, privacy and SheepShields protections are active!
 
 What gets installed
 -------------------
-  ~/Library/Application Support/Firefox/Profiles/<your profile>/user.js
-  ~/Library/Application Support/Firefox/Profiles/<your profile>/chrome/userChrome.css
-  ~/Library/Application Support/Firefox/Profiles/<your profile>/chrome/userContent.css
-  /Applications/Firefox.app/Contents/Resources/distribution/policies.json
+  ~/Library/Application Support/zen/Profiles/<your profile>/user.js
+  ~/Library/Application Support/zen/Profiles/<your profile>/chrome/userChrome.css
+  ~/Library/Application Support/zen/Profiles/<your profile>/chrome/userContent.css
+  /Applications/Zen.app/Contents/Resources/distribution/policies.json
+  (also supports /Applications/Zen Browser.app and stock Firefox.app)
 
 The policy file is what preinstalls uBlock Origin and Decentraleyes, so macOS
-asks for your admin password once. Say no and the theme and preferences still
-install; only the extensions wait. Every profile found is updated, so it works
-whatever profile Firefox actually opens.
+asks for your admin password once. Say no and the preferences still install;
+only the extensions wait. Every detected profile is updated automatically.
 
 Useful switches
 ---------------
+  sh "Install SheepFox.command" --browser zen   target Zen Browser only
   sh "Install SheepFox.command" --doctor        diagnose an install
   sh "Install SheepFox.command" --probe         red toolbar = the CSS is loading
   sh "Install SheepFox.command" --no-extensions policy without uBlock/Decentraleyes

@@ -1,6 +1,6 @@
-# SheepFox installers
+# (SheepFox) Zen browser installers
 
-The source of the two artifacts published on every `v*` tag:
+The source of the two artifacts published on every `v*` tag (compatible with both **Zen Browser** and stock **Mozilla Firefox**):
 
 | Artifact | Built from | Runs |
 | --- | --- | --- |

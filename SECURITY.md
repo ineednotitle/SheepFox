@@ -2,7 +2,7 @@
 
 ## Threat Model
 
-**(SheepFox) Firefox** is engineered around a pragmatic, high-speed everyday threat model comparable to **Brave Shields** combined with **LibreFox** anti-telemetry:
+**(SheepFox) Zen browser** is engineered around a pragmatic, high-speed everyday threat model for **Zen Browser** (and Mozilla Firefox) comparable to **Brave Shields** combined with **LibreFox** anti-telemetry:
 
 ### Protected Out-of-the-Box (Default Profile)
 - **Zero Vendor Telemetry:** Mozilla Unified Telemetry, Health Report, Normandy/Nimbus remote studies, crash ping senders, and Privacy-Preserving Attribution (PPA) are disabled and locked.
@@ -18,8 +18,8 @@
 
 ## Upstream Security Updates
 
-- **Drop-In Mode:** SheepFox deliberately sets `DisableAppUpdate` to **unset/false** in `policies.json` so stock Firefox continues receiving critical Mozilla security updates immediately.
-- **Fork Build Mode:** Track upstream Firefox security advisories and bump `mozmozbuild/firefox-version.json` promptly upon every Mozilla point release.
+- **Drop-In Mode:** SheepFox deliberately sets `DisableAppUpdate` to **unset/false** in `policies.json` so Zen Browser and stock Firefox continue receiving critical security updates immediately.
+- **Fork Build Mode:** Track upstream Gecko/Firefox security advisories and bump `mozbuild/firefox-version.json` promptly upon every Mozilla point release.
 
 ## Reporting a Vulnerability
 

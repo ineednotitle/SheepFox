@@ -1,5 +1,5 @@
 # ============================================================================
-# (SheepFox) Firefox — Linux aarch64 (ARM64 / NEON) release mozconfig
+# (SheepFox) Zen browser — Linux aarch64 (ARM64 / NEON) release mozconfig
 # Target: Raspberry Pi 5, Ampere, Graviton, Apple-silicon Linux VMs, Asahi.
 # ============================================================================
 . "$topsrcdir/../mozbuild/mozconfig.common"

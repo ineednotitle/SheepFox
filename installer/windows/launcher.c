@@ -1,5 +1,5 @@
 /* ============================================================================
-   (SheepFox) Firefox — Windows setup launcher
+   (SheepFox) Zen browser — Windows setup launcher
    ----------------------------------------------------------------------------
    This is the source of `dist/SheepFox-Setup-<version>.exe`. The build script
    (mozbuild/scripts/build-installers.py) compiles it with Zig
@@ -103,8 +103,8 @@ int main(int argc, char **argv) {
   int code;
 
   say("");
-  say("  (SheepFox) Firefox - Windows setup");
-  say("  ---------------------------------");
+  say("  (SheepFox) Zen browser - Windows setup");
+  say("  --------------------------------------");
   say("");
 
   for (index = 1; index < argc; ++index) {
@@ -173,7 +173,7 @@ int main(int argc, char **argv) {
 
   if (code == 0) {
     say("");
-    say("  Done. Restart Firefox to activate SheepFox.");
+    say("  Done. Restart Zen Browser (or Firefox) to activate SheepFox.");
   } else {
     printf("\n  Installer exited with code %d.\n", code);
   }

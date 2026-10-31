@@ -7,8 +7,8 @@
 
 -brand-shorter-name = SheepFox
 -brand-short-name = SheepFox
--brand-full-name = (SheepFox) Firefox
+-brand-full-name = (SheepFox) Zen browser
 -brand-product-name = SheepFox
 -vendor-short-name = SheepFox Project
 
-trademarkInfo = SheepFox is an independent open-source privacy & performance browser project based on Mozilla Firefox technology. Firefox and the Firefox logo are trademarks of the Mozilla Foundation.
+trademarkInfo = (SheepFox) Zen browser is an independent open-source privacy & performance browser project built for Zen Browser and Mozilla Gecko/Firefox technology. Firefox and the Firefox logo are trademarks of the Mozilla Foundation.

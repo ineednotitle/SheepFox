@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-(SheepFox) Firefox — modular configuration compiler.
+(SheepFox) Zen browser — modular configuration compiler.
 
 Reads every ``config/modules/*.js`` file and generates two artifacts:
 
 ``config/user.js``
-    A plain ``user_pref()`` profile file for stock Firefox (drop-in mode).
+    A plain ``user_pref()`` profile file for Zen Browser and stock Firefox
+    (drop-in mode).
 
 ``config/autoconfig/sheepfox.cfg``
     A system AutoConfig file. ``lockPref()`` is emitted **only** for lines that
@@ -213,8 +214,9 @@ def render_user_js(modules: list[Module]) -> str:
     names = ", ".join(module.filename for module in modules)
     out: list[str] = [
         "// ============================================================================",
-        "// (SheepFox) Firefox — Unified Profile Configuration (config/user.js)",
+        "// (SheepFox) Zen browser — Unified Profile Configuration (config/user.js)",
         "// Brave-class Gecko speed + LibreFox-grade privacy, with zero site breakage.",
+        "// Works drop-in on Zen Browser and Mozilla Firefox.",
         "// License: Mozilla Public License 2.0 (MPL-2.0)",
         "//",
         "// AUTO-GENERATED FILE — DO NOT EDIT BY HAND.",
@@ -258,8 +260,8 @@ def render_cfg(modules: list[Module]) -> str:
     total, locked = _counts(modules)
     names = ", ".join(module.filename for module in modules)
     out: list[str] = [
-        "// (SheepFox) Firefox — System AutoConfig (sheepfox.cfg)",
-        "// Line 1 MUST stay a comment: Firefox skips the first line of every .cfg.",
+        "// (SheepFox) Zen browser — System AutoConfig (sheepfox.cfg)",
+        "// Line 1 MUST stay a comment: Gecko skips the first line of every .cfg.",
         "//",
         "// AUTO-GENERATED FILE — DO NOT EDIT BY HAND.",
         "// Edit config/modules/*.js and run:  make build-configs",

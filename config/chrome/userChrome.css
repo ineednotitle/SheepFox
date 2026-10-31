@@ -1,9 +1,13 @@
 /* ============================================================================
-   (SheepFox) Firefox — userChrome.css
-   "Floating search" UI: the address bar detaches from the toolbar and floats in
-   the middle of the window as a rounded pill — the Zen / Arc look — whenever you
-   focus it (click, Ctrl+L, Ctrl+K) or open a new tab. Blur it, or load a page,
-   and it docks back into the stock toolbar.
+   (SheepFox) Zen browser — userChrome.css
+   1. On Zen Browser (#zen-main-app-wrapper present): preserves Zen Browser's
+      native floating URL bar, vertical sidebar tabs, Compact Mode slide
+      animations, Workspaces, Split View and Glance with zero interference,
+      while keeping the SheepFox proof-of-load badge and --probe support.
+   2. On stock Mozilla Firefox (no #zen-main-app-wrapper): brings the Zen / Arc
+      floating search pill to stock Firefox whenever you focus the address bar
+      (click, Ctrl+L, Ctrl+K) or open a new tab, docking back into the toolbar
+      on normal pages.
 
    Requires: toolkit.legacyUserProfileCustomizations.stylesheets = true
              (already set by config/modules/03-cleanfox.js)
@@ -12,11 +16,11 @@
    Revert:       delete this file, or run the installer with --no-ui.
 
    =========================================================================
-   TWO RULES THAT MAKE OR BREAK THIS FILE
+   THREE RULES THAT MAKE OR BREAK THIS FILE
 
    1. NO `@namespace`. An unprefixed @namespace sets the DEFAULT namespace,
       which applies to type selectors *and to the universal selector* — and
-      `#urlbar` is `*#urlbar`. Firefox built the bar as `<hbox id="urlbar">`
+      `#urlbar` is `*#urlbar`. Firefox/Gecko built the bar as `<hbox id="urlbar">`
       (XUL) until ~135, but since 140 it is plain HTML (`<html:div id="urlbar">`,
       `<html:moz-urlbar id="urlbar">` since 152). With the XUL boilerplate that
       every snippet on the internet starts with, every #urlbar rule silently
@@ -26,12 +30,19 @@
       `#urlbar #urlbar-input` and `.urlbar-input-container` globally, which
       inflated and re-centred the *toolbar* bar on every normal page.
 
+   3. ZEN BROWSER ISOLATION (`:root:not(:has(#zen-main-app-wrapper))`).
+      Zen Browser wraps `#browser` in `<hbox id="zen-main-app-wrapper">` and
+      relies on `#navigator-toolbox` transforms for Compact Mode and its own
+      native floating URL bar. Gating the pill replacement rules behind
+      `:root:not(:has(#zen-main-app-wrapper))` guarantees zero clashes in Zen
+      while giving stock Firefox the Zen floating bar automatically.
+
    =========================================================================
-   THE FLOATING STATES (all of them, so one file covers every Firefox)
+   THE FLOATING STATES (all of them, so one file covers every Gecko build)
      [pageproxystate="invalid"]   blank/new tab, or an address being edited
      [focused="true"]             the bar has focus over any page  <- Ctrl+L
-     [breakout][breakout-extend]  the megabar breakout, Firefox ~72-151
-     [expanded]                   what SmartbarInput.mjs sets, Firefox 152+
+     [breakout][breakout-extend]  the megabar breakout, Gecko ~72-151
+     [expanded]                   what SmartbarInput.mjs sets, Gecko 152+
      [open]                       the results view is open
    ============================================================================ */
 
@@ -72,17 +83,11 @@
   }
 }
 
-/* The pill escapes the boxes the toolbar normally clips its children to, and no
-   ancestor may become the containing block for a position:fixed descendant
-   (a transform / filter / backdrop-filter / perspective / contain /
-   will-change anywhere up the chain would make top/left relative to a 40px
-   toolbar instead of the window). */
-#main-window,
-#titlebar,
-#navigator-toolbox,
-#nav-bar,
-#urlbar-container,
-#urlbar > .urlbar-input-container {
+/* On stock Firefox (no #zen-main-app-wrapper), the pill escapes the boxes the
+   toolbar normally clips its children to, and no ancestor may become the
+   containing block for a position:fixed descendant. On Zen Browser, Zen's own
+   Compact Mode & sidebar transforms stay completely untouched. */
+:root:not(:has(#zen-main-app-wrapper)) :is(#main-window, #titlebar, #navigator-toolbox, #nav-bar, #urlbar-container, #urlbar > .urlbar-input-container) {
   transform: none !important;
   translate: none !important;
   rotate: none !important;
@@ -97,7 +102,7 @@
 }
 
 /* Keep the floating bar above the page, not painted underneath it. */
-#navigator-toolbox {
+:root:not(:has(#zen-main-app-wrapper)) #navigator-toolbox {
   position: relative;
   z-index: 9999 !important;
 }
@@ -105,7 +110,7 @@
 /* ----------------------------------------------------------------------------
    1. THE PILL SHELL
    ------------------------------------------------------------------------- */
-#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) {
+:root:not(:has(#zen-main-app-wrapper)) #urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) {
   position: fixed !important;
   /* Centred on --sheepfox-pill-top, TOP edge anchored so an open suggestion
      list grows downwards instead of dragging the field up. */
@@ -147,7 +152,7 @@
 
 /* With suggestions open, let the pill grow downwards — capped so it can never
    run off the bottom of the window. */
-#urlbar:is([breakout][breakout-extend], [expanded], [open]) {
+:root:not(:has(#zen-main-app-wrapper)) #urlbar:is([breakout][breakout-extend], [expanded], [open]) {
   height: auto !important;
   max-height: 62vh !important;
 }
@@ -155,7 +160,7 @@
 /* Firefox paints the bar's surface on #urlbar-background (a XUL <hbox> up to
    Firefox ~151, gone in the moz-urlbar rewrite); it is filled here when it
    exists, while #urlbar itself is always filled by the shell rule above. */
-#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) #urlbar-background {
+:root:not(:has(#zen-main-app-wrapper)) #urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) #urlbar-background {
   height: 100% !important;
   border: 1px solid var(--sheepfox-pill-border) !important;
   border-radius: var(--sheepfox-pill-radius) !important;
@@ -171,12 +176,12 @@
    While the field is empty that view is collapsed; typing brings it straight
    back (the field is no longer empty).
    ------------------------------------------------------------------------- */
-#urlbar:has(#urlbar-input:placeholder-shown) #urlbar-results,
-#urlbar:has(#urlbar-input:placeholder-shown) .urlbarView {
+:root:not(:has(#zen-main-app-wrapper)) #urlbar:has(#urlbar-input:placeholder-shown) #urlbar-results,
+:root:not(:has(#zen-main-app-wrapper)) #urlbar:has(#urlbar-input:placeholder-shown) .urlbarView {
   display: none !important;
 }
 
-#urlbar:is([pageproxystate="invalid"], [focused="true"], [open]) #urlbar-results {
+:root:not(:has(#zen-main-app-wrapper)) #urlbar:is([pageproxystate="invalid"], [focused="true"], [open]) #urlbar-results {
   /* Pin the panel to the pill instead of letting it keep the toolbar geometry:
      that mismatch is what made the list sit half a pill width to the right. */
   margin: 8px 0 10px !important;
@@ -185,7 +190,7 @@
   inset-inline: 0 !important;
 }
 
-#urlbar:is([pageproxystate="invalid"], [focused="true"]) .urlbarView {
+:root:not(:has(#zen-main-app-wrapper)) #urlbar:is([pageproxystate="invalid"], [focused="true"]) .urlbarView {
   max-height: 52vh !important;
   overflow-y: auto !important;
 }
@@ -194,7 +199,7 @@
    3. INNER LAYOUT — scoped to the floating states only, so the toolbar bar on a
    normal page keeps its stock height and alignment.
    ------------------------------------------------------------------------- */
-#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) .urlbar-input-container {
+:root:not(:has(#zen-main-app-wrapper)) #urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) .urlbar-input-container {
   height: var(--sheepfox-pill-height) !important;
   padding-inline: 20px 16px !important;
   border: none !important;
@@ -202,35 +207,35 @@
   align-items: center !important;
 }
 
-#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) #urlbar-input {
+:root:not(:has(#zen-main-app-wrapper)) #urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) #urlbar-input {
   font-size: 15px !important;
   text-align: center !important;
   color: var(--sheepfox-pill-text) !important;
 }
 
-#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) #urlbar-input::placeholder {
+:root:not(:has(#zen-main-app-wrapper)) #urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) #urlbar-input::placeholder {
   text-align: center !important;
   opacity: 0.72 !important;
 }
 
 /* Keep the pill clean on a blank tab: no shield, no page-action clutter.
    (Firefox 152+ renamed the identity box to #trust-icon-container.) */
-#urlbar[pageproxystate="invalid"] #identity-box,
-#urlbar[pageproxystate="invalid"] #trust-icon-container,
-#urlbar[pageproxystate="invalid"] #page-action-buttons,
-#urlbar[pageproxystate="invalid"] .urlbar-go-button,
-#urlbar[pageproxystate="invalid"] .urlbar-icon-wrapper {
+:root:not(:has(#zen-main-app-wrapper)) #urlbar[pageproxystate="invalid"] #identity-box,
+:root:not(:has(#zen-main-app-wrapper)) #urlbar[pageproxystate="invalid"] #trust-icon-container,
+:root:not(:has(#zen-main-app-wrapper)) #urlbar[pageproxystate="invalid"] #page-action-buttons,
+:root:not(:has(#zen-main-app-wrapper)) #urlbar[pageproxystate="invalid"] .urlbar-go-button,
+:root:not(:has(#zen-main-app-wrapper)) #urlbar[pageproxystate="invalid"] .urlbar-icon-wrapper {
   display: none !important;
 }
 
 /* Subtle lift on hover — a hint that it is one big target. */
-#urlbar:is([pageproxystate="invalid"], [focused="true"], [open]):hover {
+:root:not(:has(#zen-main-app-wrapper)) #urlbar:is([pageproxystate="invalid"], [focused="true"], [open]):hover {
   box-shadow: var(--sheepfox-pill-shadow-hover) !important;
 }
 
 /* Make the toolbar recede while the pill is out, so it reads as floating on the
    page rather than sitting in a strip. */
-#nav-bar:has(#urlbar:is([pageproxystate="invalid"], [focused="true"])) {
+:root:not(:has(#zen-main-app-wrapper)) #nav-bar:has(#urlbar:is([pageproxystate="invalid"], [focused="true"])) {
   background: transparent !important;
   border-color: transparent !important;
   box-shadow: none !important;
@@ -238,9 +243,10 @@
 
 /* ----------------------------------------------------------------------------
    4. PROOF-OF-LOAD BADGE
-   A tiny label in the corner of the window, drawn by this stylesheet. If you can
-   read "SheepFox UI", this file is parsed and applied — so anything else that
-   looks wrong is a selector, not an install. Delete this block to remove it.
+   A tiny label in the corner of the window, drawn by this stylesheet in both
+   Zen Browser and stock Firefox. If you can read "SheepFox UI", this file is
+   parsed and applied — so anything else that looks wrong is a selector, not an
+   install. Delete this block to remove it.
    ------------------------------------------------------------------------- */
 #nav-bar::after {
   content: "SheepFox UI" !important;
@@ -295,7 +301,7 @@
 /* ----------------------------------------------------------------------------
    7. POLISH
    ------------------------------------------------------------------------- */
-#urlbar {
+:root:not(:has(#zen-main-app-wrapper)) #urlbar {
   will-change: transform;
 }
 

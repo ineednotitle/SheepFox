@@ -1,5 +1,5 @@
 # ============================================================================
-# (SheepFox) Firefox — Windows x86_64 release mozconfig (clang-cl + LLD)
+# (SheepFox) Zen browser — Windows x86_64 release mozconfig (clang-cl + LLD)
 # Build from a MozillaBuild shell:
 #   export MOZCONFIG=mozbuild/mozconfig.windows-x86_64
 # ============================================================================

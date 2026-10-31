@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Automated verification suite for the (SheepFox) Firefox repository.
+Automated verification suite for the (SheepFox) Zen browser repository.
 
 Every guarantee the README makes is enforced here, so CI can never publish a
 build whose docs and behaviour disagree:
@@ -726,8 +726,8 @@ class TestBranding(unittest.TestCase):
         props = read(REPO_ROOT / "branding" / "sheepfox" / "locales" / "en-US" / "brand.properties")
         for blob in (ftl, dtd, props):
             self.assertIn("SheepFox", blob)
-            self.assertIn("(SheepFox) Firefox", blob)
-        self.assertIn("-brand-full-name = (SheepFox) Firefox", ftl)
+            self.assertIn("(SheepFox) Zen browser", blob)
+        self.assertIn("-brand-full-name = (SheepFox) Zen browser", ftl)
 
     def test_configure_sh_sets_identity_and_clears_telemetry(self) -> None:
         configure = read(REPO_ROOT / "branding" / "sheepfox" / "configure.sh")
@@ -739,7 +739,7 @@ class TestBranding(unittest.TestCase):
     def test_nsis_installer_branding(self) -> None:
         nsi = read(REPO_ROOT / "branding" / "sheepfox" / "branding.nsi")
         self.assertIn('!define BrandShortName           "SheepFox"', nsi)
-        self.assertIn('!define BrandFullName            "(SheepFox) Firefox"', nsi)
+        self.assertIn('!define BrandFullName            "(SheepFox) Zen browser"', nsi)
 
 
 class TestPatchSeries(unittest.TestCase):
@@ -1490,7 +1490,7 @@ class TestRepositoryHygiene(unittest.TestCase):
 
     def test_readme_documents_both_modes_and_targets(self) -> None:
         readme = read(REPO_ROOT / "README.md")
-        self.assertIn("(SheepFox) Firefox", readme)
+        self.assertIn("(SheepFox) Zen browser", readme)
         self.assertIn("mozbuild/", readme)
         self.assertNotIn("├── build/", readme)
         for section in ("Windows", "Linux", "macOS", "MPL-2.0"):
@@ -1705,6 +1705,178 @@ class TestDistributableInstallerArtifacts(unittest.TestCase):
         self.assertEqual(data[0x8001:0x8006], b"CD001")
         self.assertIn(b"Install SheepFox.command", data)
         self.assertIn(b"install-unix.sh", data)
+
+
+class TestZenBrowserSupport(unittest.TestCase):
+    """First-class Zen Browser discovery, Workspaces safety, and UI isolation."""
+
+    INSTALLER = REPO_ROOT / "scripts" / "install.py"
+    CHROME = REPO_ROOT / "config" / "chrome" / "userChrome.css"
+    PS1 = REPO_ROOT / "scripts" / "install-windows.ps1"
+
+    def test_zen_preferences_and_workspace_containers(self) -> None:
+        cfg = parse_prefs(read(CFG), ("lockPref", "defaultPref"))
+        user = parse_prefs(read(USER_JS), ("user_pref",))
+        self.assertIn("zen.urlbar.show-sponsored", cfg)
+        self.assertIs(cfg["zen.urlbar.show-sponsored"][0], False)
+        self.assertEqual(cfg["zen.urlbar.show-sponsored"][1], "lockPref")
+        # Contextual Identities must stay enabled so Zen Browser Workspaces work.
+        self.assertIs(user["privacy.userContext.enabled"][0], True)
+        self.assertIs(user["privacy.userContext.ui.enabled"][0], True)
+
+    def test_zen_browser_css_isolation(self) -> None:
+        css = read(self.CHROME)
+        self.assertIn(":root:not(:has(#zen-main-app-wrapper))", css)
+        # Ancestor transform reset and pill shell must never match inside Zen Browser's
+        # #zen-main-app-wrapper, preserving Zen Compact Mode & native floating URL bar.
+        self.assertIn(
+            ":root:not(:has(#zen-main-app-wrapper)) :is(#main-window,",
+            css,
+        )
+        self.assertIn(
+            ":root:not(:has(#zen-main-app-wrapper)) #urlbar:is(",
+            css,
+        )
+
+    def test_zen_profile_autodetection_and_priority(self) -> None:
+        if sys.platform == "win32":  # pragma: no cover
+            self.skipTest("POSIX HOME layout test")
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            zen_prof = home / ".zen" / "Profiles" / "z123.Default (release)"
+            ff_prof = home / ".mozilla" / "firefox" / "Profiles" / "f456.default-release"
+            zen_prof.mkdir(parents=True)
+            ff_prof.mkdir(parents=True)
+            (home / ".zen" / "profiles.ini").write_text(
+                "[Profile0]\nName=Default (release)\nIsRelative=1\n"
+                "Path=Profiles/z123.Default (release)\n",
+                encoding="utf-8",
+            )
+            (home / ".mozilla" / "firefox" / "profiles.ini").write_text(
+                "[Profile0]\nName=default-release\nIsRelative=1\n"
+                "Path=Profiles/f456.default-release\nDefault=1\n",
+                encoding="utf-8",
+            )
+            env = dict(os.environ, HOME=str(home), XDG_CONFIG_HOME=str(home / ".config"))
+
+            # 1. --browser zen touches ONLY Zen Browser.
+            only_zen = subprocess.run(
+                [sys.executable, str(self.INSTALLER), "--browser", "zen"],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
+            self.assertEqual(only_zen.returncode, 0, msg=only_zen.stdout + only_zen.stderr)
+            self.assertTrue((zen_prof / "user.js").is_file())
+            self.assertFalse((ff_prof / "user.js").exists())
+
+            # Clean up and verify --browser auto installs into BOTH with Zen first.
+            (zen_prof / "user.js").unlink()
+            both = subprocess.run(
+                [sys.executable, str(self.INSTALLER)],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
+            self.assertEqual(both.returncode, 0, msg=both.stdout + both.stderr)
+            self.assertTrue((zen_prof / "user.js").is_file())
+            self.assertTrue((ff_prof / "user.js").is_file())
+            self.assertLess(
+                both.stdout.index("z123.Default (release)"),
+                both.stdout.index("f456.default-release"),
+                msg="Zen Browser profile must be prioritized ahead of stock Firefox",
+            )
+
+    def test_zen_xdg_and_flatpak_profile_roots(self) -> None:
+        if sys.platform == "win32":  # pragma: no cover
+            self.skipTest("POSIX XDG / Flatpak layout test")
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            xdg = Path(tmp) / "xdg"
+            xdg_prof = xdg / "zen" / "Profiles" / "x1.Default Profile"
+            flatpak_prof = (
+                home / ".var" / "app" / "app.zen_browser.zen" / ".zen" / "Profiles" / "fp1.Default (release)"
+            )
+            xdg_prof.mkdir(parents=True)
+            flatpak_prof.mkdir(parents=True)
+            (xdg / "zen" / "profiles.ini").write_text(
+                "[Profile0]\nName=Default Profile\nIsRelative=1\nPath=Profiles/x1.Default Profile\n",
+                encoding="utf-8",
+            )
+            (home / ".var" / "app" / "app.zen_browser.zen" / ".zen" / "profiles.ini").write_text(
+                "[Profile0]\nName=Default (release)\nIsRelative=1\nPath=Profiles/fp1.Default (release)\n",
+                encoding="utf-8",
+            )
+            env = dict(os.environ, HOME=str(home), XDG_CONFIG_HOME=str(xdg))
+            result = subprocess.run(
+                [sys.executable, str(self.INSTALLER), "--browser", "zen"],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=env,
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+            self.assertTrue((xdg_prof / "user.js").is_file())
+            self.assertTrue((flatpak_prof / "user.js").is_file())
+
+    def test_zen_dir_alias_system_install_and_uninstall(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "zen-profile"
+            zen_dir = Path(tmp) / "zen-browser"
+            profile.mkdir()
+            zen_dir.mkdir()
+            install = subprocess.run(
+                [
+                    sys.executable,
+                    str(self.INSTALLER),
+                    "--profile",
+                    str(profile),
+                    "--zen-dir",
+                    str(zen_dir),
+                    "--system",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(install.returncode, 0, msg=install.stdout + install.stderr)
+            self.assertTrue((zen_dir / "sheepfox.cfg").is_file())
+            self.assertTrue((zen_dir / "defaults" / "pref" / "local-settings.js").is_file())
+            self.assertTrue((zen_dir / "distribution" / "policies.json").is_file())
+
+            uninstall = subprocess.run(
+                [
+                    sys.executable,
+                    str(self.INSTALLER),
+                    "--profile",
+                    str(profile),
+                    "--zen-dir",
+                    str(zen_dir),
+                    "--system",
+                    "--uninstall",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(uninstall.returncode, 0, msg=uninstall.stdout + uninstall.stderr)
+            self.assertFalse((zen_dir / "sheepfox.cfg").exists())
+            self.assertFalse((zen_dir / "distribution" / "policies.json").exists())
+
+    def test_windows_installer_zen_browser_support(self) -> None:
+        ps1 = read(self.PS1)
+        for token in (
+            '"ZenDir"',
+            "[string]$Browser",
+            '"Zen Browser"',
+            "zen.exe",
+            'Join-Path $env:APPDATA "zen"',
+            "*.Default (release)",
+            "*.Default Profile",
+        ):
+            self.assertIn(token, ps1, msg=f"install-windows.ps1 missing Zen token: {token}")
 
 
 if __name__ == "__main__":

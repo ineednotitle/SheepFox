@@ -1,12 +1,13 @@
 // ============================================================================
-// (SheepFox) Firefox — Unified Profile Configuration (config/user.js)
+// (SheepFox) Zen browser — Unified Profile Configuration (config/user.js)
 // Brave-class Gecko speed + LibreFox-grade privacy, with zero site breakage.
+// Works drop-in on Zen Browser and Mozilla Firefox.
 // License: Mozilla Public License 2.0 (MPL-2.0)
 //
 // AUTO-GENERATED FILE — DO NOT EDIT BY HAND.
 // Edit config/modules/*.js and run:  make build-configs
 // Modules: 01-speedfox.js, 02-shieldfox.js, 03-cleanfox.js, 04-smoothfox.js
-// Preferences: 134 (27 locked in the system AutoConfig)
+// Preferences: 137 (28 locked in the system AutoConfig)
 //
 // `// @lock` annotations are inert here: they only promote a preference to
 // lockPref() inside config/autoconfig/sheepfox.cfg.
@@ -99,9 +100,10 @@ user_pref("browser.sessionstore.interval", 60000);
 // ---------------------------------------------------------------------------
 // ============================================================================
 // MODULE 02: SHIELDFOX — LibreFox-grade privacy + zero-breakage compatibility
-// Goal: eliminate cross-site tracking, telemetry and network leaks while
-//       preserving 120Hz+ displays, hardware WebGL/Canvas, dark mode, timezones
-//       and normal OAuth/SSO flows.
+// Goal: eliminate cross-site tracking, telemetry and network leaks in Zen
+//       Browser (and Firefox) while preserving 120Hz+ displays, Zen Compact
+//       Mode & Mica/vibrancy themes, hardware WebGL/Canvas, dark mode,
+//       timezones, Workspaces and normal OAuth/SSO flows.
 // Lines tagged `// @lock` are promoted to lockPref() in the AutoConfig and can
 // only be changed by editing this module — they are reserved for things that
 // transmit data to remote servers.
@@ -117,6 +119,9 @@ user_pref("privacy.trackingprotection.enabled", true);
 user_pref("privacy.trackingprotection.socialtracking.enabled", true);
 user_pref("privacy.trackingprotection.cryptomining.enabled", true);
 user_pref("privacy.trackingprotection.emailtracking.enabled", true);
+// Keep Contextual Identities enabled so Zen Browser Workspaces & Containers work
+user_pref("privacy.userContext.enabled", true);
+user_pref("privacy.userContext.ui.enabled", true);
 
 // --- Balanced Anti-Fingerprinting (preserves 120Hz+, dark mode & WebGL) ---
 // Strict RFP stays OFF: it caps the refresh rate at 60Hz, forces light mode,
@@ -215,11 +220,12 @@ user_pref("browser.ml.linkPreview.enabled", false);
 user_pref("extensions.ml.enabled", false);
 user_pref("extensions.htmlaboutaddons.local_model_management", false);
 
-// --- Remove Pocket, Sponsored Tiles & Mozilla Upsells ---
+// --- Remove Pocket, Sponsored Tiles & Mozilla/URLBar Upsells ---
 user_pref("extensions.pocket.enabled", false); // @lock
 user_pref("browser.newtabpage.activity-stream.showSponsored", false); // @lock
 user_pref("browser.newtabpage.activity-stream.showSponsoredTopSites", false); // @lock
 user_pref("browser.urlbar.suggest.quicksuggest.sponsored", false); // @lock
+user_pref("zen.urlbar.show-sponsored", false); // @lock
 user_pref("browser.newtabpage.activity-stream.feeds.telemetry", false); // @lock
 user_pref("browser.newtabpage.activity-stream.telemetry", false); // @lock
 user_pref("browser.newtabpage.activity-stream.feeds.section.topstories", false);
