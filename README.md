@@ -175,7 +175,7 @@ python scripts\install.py --system --uninstall
 ### UI: floating new-tab search (Zen / Arc style)
 
 Open a new tab (`Ctrl+T`) and the address + search bar detaches from the toolbar and floats **in the
-middle of the page** as a compact rounded pill (56 px, `top: 42%`), with the New Tab wordmark
+middle of the page** as a compact rounded pill (56 px, `top: 42vh`), with the New Tab wordmark
 removed and the shortcut grid sitting below it — Zen's empty canvas with Arc's command bar.
 
 Firefox focuses the address bar on a new tab and auto-opens its suggestions dropdown; that dropdown
@@ -200,6 +200,12 @@ snips keep working because the toolbar is still XUL. That is why SheepFox's earl
 The open state is detected four ways so one file covers every Firefox: `[pageproxystate="invalid"]`
 (blank tab, all versions), `[breakout][breakout-extend]` (the megabar breakout, ~72–151),
 `[expanded]` (what `SmartbarInput.mjs` sets on 152+) and `[open]` (results view open over a page).
+
+Geometry is deliberately in **viewport units** (`42vh`, `50vw`), and every ancestor
+(`#main-window` → `#urlbar-container`) has its `transform`/`contain`/`will-change` neutralised: any
+of those would make the toolbar — not the window — the containing block for a `position: fixed` bar,
+which put the pill at a negative offset (a sliver at the very top of the window) instead of the
+middle of the page.
 
 A small **"SheepFox UI" badge** is drawn in the corner of the window by this stylesheet. It is
 deliberate: if you can read it, `userChrome.css` is parsed and applied, so anything still wrong is a
@@ -238,7 +244,7 @@ Tuning or removing it:
 
 | Want | Do |
 | :--- | :--- |
-| Move the pill / resize it | edit `--sheepfox-pill-top` (default `42%`; use `50%` for dead-centre), `--sheepfox-pill-width`, `--sheepfox-pill-height` in your profile's `chrome/userChrome.css` |
+| Move the pill / resize it | edit `--sheepfox-pill-top` (default `42vh`; use `50vh` for dead-centre), `--sheepfox-pill-width`, `--sheepfox-pill-height` in your profile's `chrome/userChrome.css` |
 | Dock it the moment you type instead of expanding | uncomment the "dock while typing" block at the bottom of `config/chrome/userChrome.css`, then reinstall |
 | Shrink it back to a normal bar | delete `<profile>/chrome/userChrome.css` |
 | Keep the pill, restore the New Tab logo | delete `<profile>/chrome/userContent.css` |

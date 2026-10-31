@@ -326,6 +326,9 @@ class TestFloatingSearchUI(unittest.TestCase):
         # Centre with `translate`, never `transform`: Firefox animates the bar
         # with transforms of its own and the two fight. This is Zen's approach.
         self.assertIn("translate: -50% 0", shell)
+        self.assertIn("left: 50vw", shell, msg="horizontal anchor must be viewport-relative")
+        self.assertIn("visibility: visible", shell)
+        self.assertIn("opacity: 1", shell)
         self.assertNotRegex(shell, r"(?m)^\s*transform:", msg="never transform the pill into place")
         self.assertIn("border-radius: var(--sheepfox-pill-radius)", shell)
         self.assertIn("box-shadow", shell)
@@ -336,7 +339,9 @@ class TestFloatingSearchUI(unittest.TestCase):
     def test_pill_is_vertically_centred_and_compact(self) -> None:
         css = read(self.CHROME)
         # Zen/Arc look: centred in the page, not pinned to the toolbar row.
-        self.assertIn("--sheepfox-pill-top: 42%", css)
+        # Viewport units: a percentage would resolve against the (collapsed)
+        # toolbar container instead of the window.
+        self.assertIn("--sheepfox-pill-top: 42vh", css)
         self.assertIn("--sheepfox-pill-height: 56px", css)
         self.assertIn(
             "top: calc(var(--sheepfox-pill-top) - var(--sheepfox-pill-height) / 2)",

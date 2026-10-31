@@ -46,10 +46,14 @@
   --sheepfox-pill-width: clamp(320px, 52vw, 680px);
   --sheepfox-pill-height: 56px;
   --sheepfox-pill-radius: 28px;
-  /* Centre of the pill as a percentage of the window height. 42% reads as
-     "middle of the page" while leaving room for the shortcut grid; use 50%
-     for dead-centre. */
-  --sheepfox-pill-top: 42%;
+  /* Centre of the pill, in VIEWPORT units on purpose. A percentage would be
+     resolved against the pill's containing block, and once #urlbar is
+     position:fixed its toolbar container collapses to a few pixels (or the
+     toolbar becomes the containing block because one of its ancestors builds
+     a new one) — which put the pill at a negative offset, i.e. a sliver at the
+     top of the window. 42vh reads as "middle of the page" while leaving room
+     for the shortcut grid; use 50vh for dead-centre. */
+  --sheepfox-pill-top: 42vh;
   --sheepfox-pill-shadow:
     0 18px 44px rgba(0, 0, 0, 0.22),
     0 2px 10px rgba(0, 0, 0, 0.12);
@@ -76,12 +80,31 @@
 }
 
 /* The pill is taller than a toolbar row, and it escapes the boxes the toolbar
-   normally clips its children to. */
+   normally clips its children to.
+
+   Also critical: ANY ancestor with a transform, filter, backdrop-filter,
+   perspective, contain, or will-change:transform becomes the containing block
+   for a position:fixed descendant — and then top/left are measured against a
+   40px toolbar instead of the window. All of those are neutralised here, and
+   the geometry itself uses vh/vw so it stays window-relative either way. */
+#main-window,
+#titlebar,
 #navigator-toolbox,
 #nav-bar,
 #urlbar-container {
-  overflow: visible !important;
+  transform: none !important;
+  filter: none !important;
+  perspective: none !important;
+  backdrop-filter: none !important;
   contain: none !important;
+  will-change: auto !important;
+  overflow: visible !important;
+}
+
+/* Keep the floating bar above the page, not painted underneath it. */
+#navigator-toolbox {
+  position: relative;
+  z-index: 9999 !important;
 }
 
 /* ----------------------------------------------------------------------------
@@ -97,10 +120,14 @@
   top: calc(var(--sheepfox-pill-top) - var(--sheepfox-pill-height) / 2) !important;
   bottom: auto !important;
   /* Centred with `translate`, not `transform`: Firefox animates the bar with
-     transforms of its own, and the two would fight. This is what Zen uses. */
-  left: 50% !important;
+     transforms of its own, and the two would fight. This is what Zen uses.
+     left is in vw for the same reason top is in vh. */
+  left: 50vw !important;
   translate: -50% 0 !important;
   right: auto !important;
+  /* Nothing may hide it: not a collapsed parent, not a focus rule. */
+  visibility: visible !important;
+  opacity: 1 !important;
   width: var(--sheepfox-pill-width) !important;
   min-width: var(--sheepfox-pill-width) !important;
   max-width: var(--sheepfox-pill-width) !important;
