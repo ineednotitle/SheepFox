@@ -69,7 +69,7 @@ jobs:
         if: failure()
         run: |
           set +e
-          grep -E -A4 '^(FAIL|ERROR): ' "${RUNNER_TEMP}/verification.log" | head -n 12 | \
+          grep -E '^(FAIL|ERROR): |^AssertionError|^FAILED' "${RUNNER_TEMP}/verification.log" | head -n 8 | \
             while IFS= read -r line; do
               printf '::error title=verification::%s\n' "${line}"
             done
