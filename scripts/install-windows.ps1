@@ -497,8 +497,15 @@ if ($Doctor) {
     }
 
     if ($FirefoxDir -and (Test-Path $FirefoxDir)) {
-        foreach ($rel in @("sheepfox.cfg", "defaults\pref\local-settings.js", "distribution\policies.json")) {
-            Report-Check (Test-Path (Join-Path $FirefoxDir $rel)) "system $rel"
+        $systemFiles = @("sheepfox.cfg", "defaults\pref\local-settings.js", "distribution\policies.json")
+        $installed = @($systemFiles | Where-Object { Test-Path (Join-Path $FirefoxDir $_) })
+        foreach ($rel in $installed) {
+            Report-Check $true "system $rel"
+        }
+        if ($installed.Count -eq 0) {
+            Write-SheepFox "  [info] no system install here (-System is optional):" "Gray"
+            Write-SheepFox "         policies.json + AutoConfig are what lock uBlock Origin and the shields." "Gray"
+            Write-SheepFox "         add them with:  .\scripts\install-windows.bat -System" "Gray"
         }
     }
 

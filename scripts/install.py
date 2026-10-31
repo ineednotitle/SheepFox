@@ -323,9 +323,18 @@ def doctor(profile_dir: Path | None, firefox_dir: Path | None) -> int:
         print()
         print(f"  [info] {len(others)} other profile(s) found, none of them modified.")
 
+    # The system half (policies.json + AutoConfig) is optional: a plain
+    # per-profile install leaves a Firefox folder completely untouched, so an
+    # absent file there is not a problem - only an opportunity.
     if firefox_dir:
-        for rel in ("sheepfox.cfg", "defaults/pref/local-settings.js", "distribution/policies.json"):
-            report((firefox_dir / rel).is_file(), f"system {rel}")
+        system_files = ("sheepfox.cfg", "defaults/pref/local-settings.js", "distribution/policies.json")
+        installed = [rel for rel in system_files if (firefox_dir / rel).is_file()]
+        for rel in installed:
+            report(True, f"system {rel}")
+        if not installed:
+            print("  [info] no system install here (--system is optional):")
+            print("         policies.json + AutoConfig are what lock uBlock Origin and the shields.")
+            print("         add them with:  python3 scripts/install.py --system")
 
     print()
     if failures:

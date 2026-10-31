@@ -983,6 +983,29 @@ class TestInstallers(unittest.TestCase):
             self.assertIn("[OK  ] chrome/userChrome.css", result.stdout)
             self.assertNotIn("FAIL", result.stdout)
 
+    def test_doctor_does_not_fail_on_a_profile_only_install(self) -> None:
+        """A stock Firefox folder has no sheepfox.cfg/policies.json - not a problem."""
+        installer = REPO_ROOT / "scripts" / "install.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "profile"
+            profile.mkdir()
+            firefox_dir = Path(tmp) / "firefox"
+            firefox_dir.mkdir()
+            subprocess.run(
+                [sys.executable, str(installer), "--profile", str(profile)],
+                capture_output=True,
+                check=True,
+            )
+            result = subprocess.run(
+                [sys.executable, str(installer), "--profile", str(profile), "--firefox-dir", str(firefox_dir), "--doctor"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+            self.assertNotIn("[FAIL]", result.stdout)
+            self.assertIn("no system install here", result.stdout)
+
     def test_doctor_fails_on_a_bare_profile(self) -> None:
         installer = REPO_ROOT / "scripts" / "install.py"
         with tempfile.TemporaryDirectory() as tmp:
