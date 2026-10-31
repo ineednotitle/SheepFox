@@ -576,12 +576,16 @@ class TestZenBrowserTarget(unittest.TestCase):
 
     @staticmethod
     def _run(home: Path, *arguments: str) -> subprocess.CompletedProcess:
+        # XDG_CONFIG_HOME is pinned: on a runner that sets it, the default
+        # ~/.config/zen root is one of the two places Zen may live, and the
+        # installer honours both.
+        environment = dict(os.environ, HOME=str(home), XDG_CONFIG_HOME=str(home / ".config"))
         return subprocess.run(
             [sys.executable, str(TestZenBrowserTarget.INSTALLER), *arguments],
             capture_output=True,
             text=True,
             check=False,
-            env=dict(os.environ, HOME=str(home)),
+            env=environment,
         )
 
     @staticmethod

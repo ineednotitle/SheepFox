@@ -137,14 +137,18 @@ def candidate_zen_profile_roots() -> list[Path]:
         return [appdata / "zen", appdata / "Zen", local / "zen"]
     if system == "Darwin":
         return [home / "Library" / "Application Support" / "zen"]
-    xdg = Path(os.environ.get("XDG_CONFIG_HOME", home / ".config"))
+    # Zen uses $XDG_CONFIG_HOME/zen, and ~/.config/zen when that is unset. Both
+    # are listed: a user (or CI) may have XDG_CONFIG_HOME pointing somewhere
+    # else while the profiles live in the default place, or the reverse.
+    xdg_roots = []
+    for base in (os.environ.get("XDG_CONFIG_HOME"), str(home / ".config")):
+        if base:
+            candidate = Path(base) / "zen"
+            if candidate not in xdg_roots:
+                xdg_roots.append(candidate)
     flatpak = home / ".var" / "app" / "app.zen_browser.zen"
-    return [
-        home / ".zen",
-        xdg / "zen",
-        flatpak / ".zen",
-        flatpak / "config" / "zen",
-    ]
+    roots = [home / ".zen", *xdg_roots, flatpak / ".zen", flatpak / "config" / "zen"]
+    return roots
 
 
 def candidate_zen_dirs() -> list[Path]:
