@@ -123,9 +123,11 @@ def find_zig(explicit: str | None) -> str:
     try:
         import ziglang  # type: ignore
 
-        candidate = Path(ziglang.__file__).parent / "zig"
-        if candidate.is_file():
-            return str(candidate)
+        package = Path(ziglang.__file__).parent
+        for name in ("zig", "zig.exe"):
+            candidate = package / name
+            if candidate.is_file():
+                return str(candidate)
     except ImportError:
         pass
     found = shutil.which("zig")
@@ -202,9 +204,9 @@ def build_volume_tree(root: Path) -> None:
     shutil.copy2(INSTALLER_DIR / "macos" / "Install SheepFox.command", root / "Install SheepFox.command")
     shutil.copy2(INSTALLER_DIR / "macos" / "README.txt", root / "README.txt")
     for relative in EXECUTABLE:
-        candidate = root / relative
-        if candidate.exists():
-            candidate.chmod(0o755)
+        for candidate in (root / relative, root / "SheepFox" / relative):
+            if candidate.exists():
+                candidate.chmod(0o755)
 
 
 def _iso_component(name: str, used: set[tuple[str, str]]) -> str:
@@ -358,9 +360,14 @@ def build_macos(version: str) -> list[Path]:
         volume.mkdir()
         build_volume_tree(volume)
         if shutil.which("hdiutil"):
-            dmg_path = build_macos_native(volume, version, label)
-            print(f"  [ok]   {dmg_path.relative_to(REPO_ROOT)}  ({dmg_path.stat().st_size} bytes)")
-            return [dmg_path]
+            try:
+                dmg_path = build_macos_native(volume, version, label)
+            except SystemExit as error:
+                print(f"  [warn] {error}")
+                print("  [warn] falling back to the portable ISO9660/UDIF writer")
+            else:
+                print(f"  [ok]   {dmg_path.relative_to(REPO_ROOT)}  ({dmg_path.stat().st_size} bytes)")
+                return [dmg_path]
         image = build_iso(volume, label)
     iso_path = DIST_DIR / f"SheepFox-{version}.iso"
     iso_path.write_bytes(image)
@@ -392,30 +399,38 @@ def verify_windows(path: Path) -> None:
     print(f"  [verify] {path.name}: PE32+ x86-64, {len(names)} payload files")
 
 
+def _mish_chunk_types(blkx: bytes) -> list[int]:
+    count = max(0, (len(blkx) - 200) // 40)
+    return [int.from_bytes(blkx[200 + index * 40 : 204 + index * 40], "big") for index in range(count)]
+
+
 def verify_dmg(path: Path) -> None:
     data = path.read_bytes()
     trailer = data[-512:]
     if trailer[:4] != b"koly":
-        # An hdiutil image (HFS+ UDZO) carries its own trailer layout; size is
-        # the only cheap thing to assert without macOS tooling.
-        if len(data) > 512:
-            print(f"  [verify] {path.name}: {len(data)} bytes (native hdiutil image)")
-            return
         raise SystemExit(f"[error] {path.name}: no UDIF trailer")
     length = int.from_bytes(trailer[32:40], "big")
     xml_offset = int.from_bytes(trailer[216:224], "big")
     xml_length = int.from_bytes(trailer[224:232], "big")
-    if xml_offset + xml_length + 512 != len(data):
-        raise SystemExit(f"[error] {path.name}: the XML plist does not line up with the trailer")
     xml = data[xml_offset:xml_offset + xml_length]
-    if int.from_bytes(trailer[360:364], "big") != zlib.crc32(xml) & 0xFFFFFFFF:
-        raise SystemExit(f"[error] {path.name}: plist checksum mismatch")
-    if int.from_bytes(trailer[88:92], "big") != zlib.crc32(data[:length]) & 0xFFFFFFFF:
-        raise SystemExit(f"[error] {path.name}: data fork checksum mismatch")
-    blkx = plistlib.loads(xml)["resource-fork"]["blkx"][0]["Data"]
-    if blkx[:4] != b"mish":
+    try:
+        fork = plistlib.loads(xml)["resource-fork"]["blkx"][0]["Data"]
+    except Exception as error:  # noqa: BLE001 - any malformed plist is fatal
+        raise SystemExit(f"[error] {path.name}: unreadable UDIF plist ({error})")
+    if fork[:4] != b"mish":
         raise SystemExit(f"[error] {path.name}: missing the blkx mish block")
-    print(f"  [verify] {path.name}: UDIF koly trailer, checksums match")
+    chunks = _mish_chunk_types(fork)
+    raw = all(kind == 1 for kind in chunks)
+    if raw:
+        # Our own writer: the layout and both checksums must add up exactly.
+        if xml_offset + xml_length + 512 != len(data):
+            raise SystemExit(f"[error] {path.name}: the XML plist does not line up with the trailer")
+        if int.from_bytes(trailer[360:364], "big") != zlib.crc32(xml) & 0xFFFFFFFF:
+            raise SystemExit(f"[error] {path.name}: plist checksum mismatch")
+        if int.from_bytes(trailer[88:92], "big") != zlib.crc32(data[:length]) & 0xFFFFFFFF:
+            raise SystemExit(f"[error] {path.name}: data fork checksum mismatch")
+    kind = "raw" if raw else "compressed"
+    print(f"  [verify] {path.name}: UDIF image, {len(chunks)} chunk(s), {kind}")
 
 
 def verify_iso(path: Path) -> None:
