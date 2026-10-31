@@ -298,30 +298,36 @@ class TestFloatingSearchUI(unittest.TestCase):
         self.assertIn("toolkit.legacyUserProfileCustomizations.stylesheets", user_js)
         self.assertIs(user_js["toolkit.legacyUserProfileCustomizations.stylesheets"][0], True)
 
+    #: Every attribute that puts the bar into its floating state.
+    STATES = (
+        '[pageproxystate="invalid"]',
+        '[focused="true"]',
+        '[breakout][breakout-extend]',
+        '[expanded]',
+        '[open]',
+    )
+
     @property
     def shell(self) -> str:
         """The pill's main rule: everything between the two markers below."""
         css = read(self.CHROME)
         begin = css.index("1. THE PILL SHELL")
-        return css[begin : css.index("Once the suggestions open", begin)]
+        return css[begin : css.index("With suggestions open", begin)]
 
-    def test_pill_is_scoped_to_the_blank_and_open_states(self) -> None:
+    def test_pill_is_scoped_to_the_floating_states(self) -> None:
         css = read(self.CHROME)
         shell = self.shell
-        # Trigger 1: a new/blank tab (nothing loaded to show).
-        self.assertIn('#urlbar[pageproxystate="invalid"]', shell)
-        # Trigger 2: the megabar breakout state (Firefox ~72-151) - what Zen's
-        # own theme gates on, and the state Firefox lays out itself.
-        self.assertIn("#urlbar[breakout][breakout-extend]", shell)
-        # Triggers 3 and 4: the state SmartbarInput sets on 152+ and the plain
-        # "results view is open" state, so one file covers every version.
-        self.assertIn("#urlbar[expanded]", shell)
-        self.assertIn("#urlbar[open]", shell)
+        self.assertIn("#urlbar:is(", shell, msg="states must be listed in one :is() list")
+        for state in self.STATES:
+            self.assertIn(state, shell, msg=f"missing floating state {state}")
+        # [focused="true"] is what makes Ctrl+L / clicking the bar float it over
+        # the page you are already on, instead of only working on a blank tab.
+        self.assertIn('[focused="true"]', shell)
         self.assertIn("position: fixed", shell, msg="the pill must leave the toolbar")
-        # Firefox sets top/left/width on the breakout state, so those five
-        # properties need !important or the bar snaps back into the toolbar.
+        # Firefox sets top/left/width on the breakout state, so those need
+        # !important or the bar snaps back into the toolbar.
         for prop in ("top:", "left:", "width:", "position:"):
-            self.assertIn(f"{prop}", shell)
+            self.assertIn(prop, shell)
         self.assertIn("!important", shell)
         # Centre with `translate`, never `transform`: Firefox animates the bar
         # with transforms of its own and the two fight. This is Zen's approach.
@@ -336,24 +342,44 @@ class TestFloatingSearchUI(unittest.TestCase):
         # Never hide or disable the address bar itself.
         self.assertNotRegex(css, r"#urlbar\s*\{[^}]*display:\s*none")
 
+    def test_inner_layout_is_scoped_to_the_pill(self) -> None:
+        """Regression: unscoped rules inflated the toolbar bar on every page.
+
+        Styling `#urlbar #urlbar-input` / `#urlbar .urlbar-input-container`
+        without a state matched normal browsing too, so YouTube and every other
+        site got a full-width, 56px, centre-aligned address bar.
+        """
+        css = read(self.CHROME)
+        self.assertNotIn("#urlbar #urlbar-input {", css)
+        self.assertNotIn("#urlbar .urlbar-input-container {", css)
+        self.assertNotRegex(css, r"(?m)^#urlbar #urlbar-background")
+        # Every rule that alters the field's text alignment must be state-gated.
+        for match in re.finditer(r"(?m)^([^\n{}]+)\{[^}]*text-align:\s*center", css):
+            selector = match.group(1)
+            self.assertIn(":is(", selector, msg=f"unscoped centring: {selector.strip()}")
+        # Same for the input container's height.
+        for match in re.finditer(r"(?m)^([^\n{}]+)\{[^}]*height: var\(--sheepfox-pill-height\)", css):
+            self.assertIn(":is(", match.group(1), msg=f"unscoped pill height: {match.group(1).strip()}")
+
     def test_pill_is_vertically_centred_and_compact(self) -> None:
         css = read(self.CHROME)
         # Zen/Arc look: centred in the page, not pinned to the toolbar row.
         # Viewport units: a percentage would resolve against the (collapsed)
         # toolbar container instead of the window.
         self.assertIn("--sheepfox-pill-top: 42vh", css)
-        self.assertIn("--sheepfox-pill-height: 56px", css)
+        self.assertIn("--sheepfox-pill-height: 52px", css)
         self.assertIn(
             "top: calc(var(--sheepfox-pill-top) - var(--sheepfox-pill-height) / 2)",
             css,
             msg="pill vertical anchor must stay centred but top-anchored",
         )
-        # Collapsed state is locked to 56px so the auto-opened dropdown cannot
-        # balloon it; the open state may grow again, capped.
+        # Collapsed state is locked so the auto-opened dropdown cannot balloon
+        # it; the open state may grow again, capped.
         self.assertIn("max-height: var(--sheepfox-pill-height)", css)
-        grown = css.split("#urlbar[open],\n#urlbar[pageproxystate=\"invalid\"][breakout-extend] {", 1)
-        self.assertEqual(len(grown), 2, msg="the open state must unclamp the height")
-        self.assertIn("max-height: 62vh", css)
+        grown = css[css.index("With suggestions open") :]
+        self.assertIn("max-height: 62vh", grown)
+        # No ancestor may become the containing block of the fixed bar.
+        self.assertIn("will-change: auto", css)
 
     def test_empty_new_tab_collapses_the_suggestions_panel(self) -> None:
         # Firefox opens the awesomebar results view on the new-tab autofocus;
@@ -364,10 +390,10 @@ class TestFloatingSearchUI(unittest.TestCase):
         self.assertIn("display: none", hidden)
         # The dock-while-typing opt-out ships commented out, so the default stays
         # the Zen/Arc behaviour.
-        self.assertIn("/*\n#urlbar[open],", css)
+        self.assertIn("/*\n#urlbar:is([breakout][breakout-extend], [expanded], [open]) {", css)
         self.assertIn("position: relative !important;", css)
         # Zen's dimming backdrop ships commented out too.
-        self.assertIn("#urlbar[open]::after", css)
+        self.assertIn("#urlbar[open]::after", css)  # Zen backdrop, commented out
         self.assertIn("backdrop-filter: blur(5px)", css)
 
     def test_proof_of_load_badge(self) -> None:

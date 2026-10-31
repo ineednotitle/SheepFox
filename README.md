@@ -174,9 +174,10 @@ python scripts\install.py --system --uninstall
 
 ### UI: floating new-tab search (Zen / Arc style)
 
-Open a new tab (`Ctrl+T`) and the address + search bar detaches from the toolbar and floats **in the
-middle of the page** as a compact rounded pill (56 px, `top: 42vh`), with the New Tab wordmark
-removed and the shortcut grid sitting below it — Zen's empty canvas with Arc's command bar.
+Open a new tab (`Ctrl+T`), or just focus the address bar on any page (`Ctrl+L` / clicking it), and
+the bar detaches from the toolbar and floats **in the middle of the page** as a compact rounded pill
+(52 px, max 620 px wide, centred at `42vh`). On a new tab the wordmark is removed and the shortcut
+grid sits below it — Zen's empty canvas with Arc's command bar. Blur it and it docks straight back.
 
 Firefox focuses the address bar on a new tab and auto-opens its suggestions dropdown; that dropdown
 is collapsed while the field is empty, so a blank tab really is a pill and not a form. As soon as
@@ -206,6 +207,11 @@ Geometry is deliberately in **viewport units** (`42vh`, `50vw`), and every ances
 of those would make the toolbar — not the window — the containing block for a `position: fixed` bar,
 which put the pill at a negative offset (a sliver at the very top of the window) instead of the
 middle of the page.
+
+Every visual rule is **scoped to a floating state**. Earlier builds styled `#urlbar-input` and
+`.urlbar-input-container` unconditionally, which inflated and re-centred the *toolbar* bar on every
+normal page — a full-width, 56 px, centre-aligned address bar on YouTube and everywhere else. Only
+the pill states get the treatment now; normal browsing is untouched.
 
 A small **"SheepFox UI" badge** is drawn in the corner of the window by this stylesheet. It is
 deliberate: if you can read it, `userChrome.css` is parsed and applied, so anything still wrong is a

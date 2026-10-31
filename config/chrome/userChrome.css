@@ -1,8 +1,9 @@
 /* ============================================================================
    (SheepFox) Firefox — userChrome.css
    "Floating search" UI: the address bar detaches from the toolbar and floats in
-   the middle of the window as a rounded pill — the Zen / Arc look — then docks
-   back into the toolbar when you load a page or press Escape.
+   the middle of the window as a rounded pill — the Zen / Arc look — whenever you
+   focus it (click, Ctrl+L, Ctrl+K) or open a new tab. Blur it, or load a page,
+   and it docks back into the stock toolbar.
 
    Requires: toolkit.legacyUserProfileCustomizations.stylesheets = true
              (already set by config/modules/03-cleanfox.js)
@@ -11,48 +12,40 @@
    Revert:       delete this file, or run the installer with --no-ui.
 
    =========================================================================
-   DO NOT ADD `@namespace url("...there.is.only.xul")` TO THIS FILE.
-   Nearly every floating-urlbar snippet on the internet starts with it. It is
-   the reason earlier SheepFox builds did nothing at all:
+   TWO RULES THAT MAKE OR BREAK THIS FILE
 
-     * `@namespace url(...)` without a prefix sets the DEFAULT namespace, and a
-       default namespace applies to type selectors *and to the universal
-       selector*. `#urlbar` is `*#urlbar`, so it only matches elements in that
-       namespace.
-     * Firefox used to build the bar as `<hbox id="urlbar">` (XUL). Since
-       Firefox 140 it is plain HTML — `<html:div id="urlbar">`, and since 152
-       `<html:moz-urlbar id="urlbar">`. An XUL default namespace therefore stops
-       `#urlbar` (and every rule hanging off it) from matching, silently, with
-       no console error.
-     * `#nav-bar` and `#navigator-toolbox` are still XUL, so a `#nav-bar`
-       snippet like the --probe still "works" - which is exactly why the probe
-       looked healthy while the pill never appeared.
+   1. NO `@namespace`. An unprefixed @namespace sets the DEFAULT namespace,
+      which applies to type selectors *and to the universal selector* — and
+      `#urlbar` is `*#urlbar`. Firefox built the bar as `<hbox id="urlbar">`
+      (XUL) until ~135, but since 140 it is plain HTML (`<html:div id="urlbar">`,
+      `<html:moz-urlbar id="urlbar">` since 152). With the XUL boilerplate that
+      every snippet on the internet starts with, every #urlbar rule silently
+      matches nothing.
 
-   Every selector here is id/attribute/class based, so no namespace is needed.
+   2. EVERY visual rule is scoped to a floating state. Earlier builds styled
+      `#urlbar #urlbar-input` and `.urlbar-input-container` globally, which
+      inflated and re-centred the *toolbar* bar on every normal page.
+
    =========================================================================
-
-   HOW THE OPEN STATE IS DETECTED, BY FIREFOX VERSION
-     [pageproxystate="invalid"]      every version - blank/new tab, nothing loaded
-     [breakout][breakout-extend]     the megabar breakout state, Firefox ~72-151
-     [expanded]                      the state SmartbarInput.mjs sets (152+)
-     [open]                          the results view is open over any page
-   All four are listed so one file works on every supported Firefox.
+   THE FLOATING STATES (all of them, so one file covers every Firefox)
+     [pageproxystate="invalid"]   blank/new tab, or an address being edited
+     [focused="true"]             the bar has focus over any page  <- Ctrl+L
+     [breakout][breakout-extend]  the megabar breakout, Firefox ~72-151
+     [expanded]                   what SmartbarInput.mjs sets, Firefox 152+
+     [open]                       the results view is open
    ============================================================================ */
 
 @import url("sheepfox-probe.css");
 
 /* --- Tokens: one place to tune the pill ------------------------------------ */
 :root {
-  --sheepfox-pill-width: clamp(320px, 52vw, 680px);
-  --sheepfox-pill-height: 56px;
-  --sheepfox-pill-radius: 28px;
-  /* Centre of the pill, in VIEWPORT units on purpose. A percentage would be
-     resolved against the pill's containing block, and once #urlbar is
-     position:fixed its toolbar container collapses to a few pixels (or the
-     toolbar becomes the containing block because one of its ancestors builds
-     a new one) — which put the pill at a negative offset, i.e. a sliver at the
-     top of the window. 42vh reads as "middle of the page" while leaving room
-     for the shortcut grid; use 50vh for dead-centre. */
+  --sheepfox-pill-width: clamp(320px, 46vw, 620px);
+  --sheepfox-pill-height: 52px;
+  --sheepfox-pill-radius: 26px;
+  /* Viewport units on purpose: a percentage resolves against the pill's
+     containing block, and once #urlbar is fixed its toolbar container is a few
+     pixels tall — 42% of that put the pill above the window. Use 50vh for
+     dead-centre. */
   --sheepfox-pill-top: 42vh;
   --sheepfox-pill-shadow:
     0 18px 44px rgba(0, 0, 0, 0.22),
@@ -79,14 +72,11 @@
   }
 }
 
-/* The pill is taller than a toolbar row, and it escapes the boxes the toolbar
-   normally clips its children to.
-
-   Also critical: ANY ancestor with a transform, filter, backdrop-filter,
-   perspective, contain, or will-change:transform becomes the containing block
-   for a position:fixed descendant — and then top/left are measured against a
-   40px toolbar instead of the window. All of those are neutralised here, and
-   the geometry itself uses vh/vw so it stays window-relative either way. */
+/* The pill escapes the boxes the toolbar normally clips its children to, and no
+   ancestor may become the containing block for a position:fixed descendant
+   (a transform / filter / backdrop-filter / perspective / contain /
+   will-change anywhere up the chain would make top/left relative to a 40px
+   toolbar instead of the window). */
 #main-window,
 #titlebar,
 #navigator-toolbox,
@@ -110,24 +100,17 @@
 /* ----------------------------------------------------------------------------
    1. THE PILL SHELL
    ------------------------------------------------------------------------- */
-#urlbar[pageproxystate="invalid"],
-#urlbar[breakout][breakout-extend],
-#urlbar[expanded],
-#urlbar[open] {
+#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) {
   position: fixed !important;
-  /* Centre the 56px pill on --sheepfox-pill-top but anchor its TOP edge, so an
-     open suggestion list grows downwards instead of dragging the field up. */
+  /* Centred on --sheepfox-pill-top, TOP edge anchored so an open suggestion
+     list grows downwards instead of dragging the field up. */
   top: calc(var(--sheepfox-pill-top) - var(--sheepfox-pill-height) / 2) !important;
   bottom: auto !important;
-  /* Centred with `translate`, not `transform`: Firefox animates the bar with
-     transforms of its own, and the two would fight. This is what Zen uses.
-     left is in vw for the same reason top is in vh. */
+  /* Centred with `translate`, never `transform`: Firefox animates the bar with
+     transforms of its own and the two fight. This is what Zen does. */
   left: 50vw !important;
   translate: -50% 0 !important;
   right: auto !important;
-  /* Nothing may hide it: not a collapsed parent, not a focus rule. */
-  visibility: visible !important;
-  opacity: 1 !important;
   width: var(--sheepfox-pill-width) !important;
   min-width: var(--sheepfox-pill-width) !important;
   max-width: var(--sheepfox-pill-width) !important;
@@ -141,27 +124,24 @@
   background: var(--sheepfox-pill-bg) !important;
   box-shadow: var(--sheepfox-pill-shadow) !important;
   z-index: 100000 !important;
+  visibility: visible !important;
+  opacity: 1 !important;
   transition:
     box-shadow var(--sheepfox-pill-speed) ease,
     top var(--sheepfox-pill-speed) ease !important;
 }
 
-/* Once the suggestions open, let the pill grow downwards — capped so it can
-   never run off the bottom of the window. */
-#urlbar[breakout][breakout-extend],
-#urlbar[expanded],
-#urlbar[open],
-#urlbar[pageproxystate="invalid"][breakout-extend] {
+/* With suggestions open, let the pill grow downwards — capped so it can never
+   run off the bottom of the window. */
+#urlbar:is([breakout][breakout-extend], [expanded], [open]) {
   height: auto !important;
   max-height: 62vh !important;
 }
 
 /* Firefox paints the bar's surface on #urlbar-background (a XUL <hbox> up to
-   Firefox ~151, gone in the moz-urlbar rewrite), so the fill/border/radius are
-   applied there too when it exists, and on #urlbar itself always. */
-#urlbar #urlbar-background,
-#urlbar[pageproxystate="invalid"] #urlbar-background,
-#urlbar[breakout][breakout-extend] #urlbar-background {
+   Firefox ~151, gone in the moz-urlbar rewrite); it is filled here when it
+   exists, while #urlbar itself is always filled by the shell rule above. */
+#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) #urlbar-background {
   height: 100% !important;
   border: 1px solid var(--sheepfox-pill-border) !important;
   border-radius: var(--sheepfox-pill-radius) !important;
@@ -172,44 +152,44 @@
 }
 
 /* ----------------------------------------------------------------------------
-   2. AN EMPTY NEW TAB IS A PILL, NOT A FORM
+   2. AN EMPTY FIELD IS A PILL, NOT A FORM
    Firefox focuses the address bar on a new tab and auto-opens the results view.
-   While the field is empty that view is collapsed, so a blank tab is a pill.
-   Typing brings it straight back (the field is no longer empty).
+   While the field is empty that view is collapsed; typing brings it straight
+   back (the field is no longer empty).
    ------------------------------------------------------------------------- */
 #urlbar:has(#urlbar-input:placeholder-shown) #urlbar-results,
 #urlbar:has(#urlbar-input:placeholder-shown) .urlbarView {
   display: none !important;
 }
 
-/* Geometry for the suggestion list while it is open. */
-#urlbar #urlbar-results {
+#urlbar:is([pageproxystate="invalid"], [focused="true"]) #urlbar-results {
   margin: 8px 0 10px !important;
 }
 
-#urlbar .urlbarView {
+#urlbar:is([pageproxystate="invalid"], [focused="true"]) .urlbarView {
   max-height: 52vh !important;
   overflow-y: auto !important;
 }
 
 /* ----------------------------------------------------------------------------
-   3. INNER LAYOUT
+   3. INNER LAYOUT — scoped to the floating states only, so the toolbar bar on a
+   normal page keeps its stock height and alignment.
    ------------------------------------------------------------------------- */
-#urlbar .urlbar-input-container {
+#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) .urlbar-input-container {
   height: var(--sheepfox-pill-height) !important;
-  padding-inline: 22px 18px !important;
+  padding-inline: 20px 16px !important;
   border: none !important;
   background: transparent !important;
   align-items: center !important;
 }
 
-#urlbar #urlbar-input {
-  font-size: 16px !important;
+#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) #urlbar-input {
+  font-size: 15px !important;
   text-align: center !important;
   color: var(--sheepfox-pill-text) !important;
 }
 
-#urlbar #urlbar-input::placeholder {
+#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) #urlbar-input::placeholder {
   text-align: center !important;
   opacity: 0.72 !important;
 }
@@ -225,15 +205,13 @@
 }
 
 /* Subtle lift on hover — a hint that it is one big target. */
-#urlbar[pageproxystate="invalid"]:hover,
-#urlbar[breakout][breakout-extend]:hover,
-#urlbar[open]:hover {
+#urlbar:is([pageproxystate="invalid"], [focused="true"], [open]):hover {
   box-shadow: var(--sheepfox-pill-shadow-hover) !important;
 }
 
-/* Make the toolbar itself recede while the pill is out, so it reads as
-   floating on the page rather than sitting in a strip. */
-#nav-bar:has(#urlbar[pageproxystate="invalid"]) {
+/* Make the toolbar recede while the pill is out, so it reads as floating on the
+   page rather than sitting in a strip. */
+#nav-bar:has(#urlbar:is([pageproxystate="invalid"], [focused="true"])) {
   background: transparent !important;
   border-color: transparent !important;
   box-shadow: none !important;
@@ -242,9 +220,8 @@
 /* ----------------------------------------------------------------------------
    4. PROOF-OF-LOAD BADGE
    A tiny label in the corner of the window, drawn by this stylesheet. If you can
-   read "SheepFox UI", this file is being parsed and applied — so anything else
-   that looks wrong is a selector, not an install. Remove this whole block (or
-   run the installer with --no-ui) to get rid of it.
+   read "SheepFox UI", this file is parsed and applied — so anything else that
+   looks wrong is a selector, not an install. Delete this block to remove it.
    ------------------------------------------------------------------------- */
 #nav-bar::after {
   content: "SheepFox UI" !important;
@@ -283,9 +260,7 @@
    start typing instead of staying centred with the results open under it.
    ------------------------------------------------------------------------- */
 /*
-#urlbar[open],
-#urlbar[breakout][breakout-extend],
-#urlbar[expanded] {
+#urlbar:is([breakout][breakout-extend], [expanded], [open]) {
   position: relative !important;
   top: auto !important;
   left: auto !important;
@@ -301,17 +276,14 @@
 /* ----------------------------------------------------------------------------
    7. POLISH
    ------------------------------------------------------------------------- */
-/* Keep the bar on its own compositor layer so the transition stays smooth on
-   120Hz/144Hz/240Hz panels instead of re-rasterising the toolbar. */
 #urlbar {
   will-change: transform;
 }
 
-/* Respect the OS reduced-motion setting. */
 @media (prefers-reduced-motion: reduce) {
   #urlbar,
   #urlbar[pageproxystate="invalid"],
-  #urlbar[open] {
+  #urlbar[focused="true"] {
     transition: none !important;
   }
 }
