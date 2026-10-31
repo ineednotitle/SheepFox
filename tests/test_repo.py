@@ -1299,5 +1299,175 @@ class TestRepositoryHygiene(unittest.TestCase):
             self.assertNotIn("__pycache__", name)
 
 
+class TestDistributableInstallerArtifacts(unittest.TestCase):
+    """The .exe / .dmg pipeline: one source of config, two packaging formats."""
+
+    INSTALLER_DIR = REPO_ROOT / "installer"
+    BUILD_SCRIPT = REPO_ROOT / "mozbuild" / "scripts" / "build-installers.py"
+    DIST_DIR = REPO_ROOT / "dist"
+
+    def test_version_manifest(self) -> None:
+        version = (self.INSTALLER_DIR / "version.txt").read_text(encoding="utf-8").strip()
+        self.assertRegex(version, r"^\d+\.\d+\.\d+$")
+
+    def test_build_script_contract(self) -> None:
+        self.assertTrue(self.BUILD_SCRIPT.is_file())
+        text = read(self.BUILD_SCRIPT)
+        for switch in ("--windows", "--macos", "--zig"):
+            self.assertIn(switch, text)
+        # The payload must come from the repository, never from a copy.
+        self.assertIn("PAYLOAD_FILES", text)
+        self.assertIn('"config/user.js"', text)
+        self.assertIn('"config/chrome/userChrome.css"', text)
+        self.assertNotIn("shutil.copytree(REPO_ROOT / \"config\"", text)
+
+    def test_every_config_file_is_in_the_payload(self) -> None:
+        text = read(self.BUILD_SCRIPT)
+        listed = set(re.findall(r'"(config/[^"]+)"', text))
+        on_disk = {
+            path.relative_to(REPO_ROOT).as_posix()
+            for path in (REPO_ROOT / "config").rglob("*")
+            if path.is_file()
+        }
+        missing = on_disk - listed
+        self.assertFalse(missing, msg=f"not shipped by the installers: {sorted(missing)}")
+
+    def test_windows_launcher_source(self) -> None:
+        source = read(self.INSTALLER_DIR / "windows" / "launcher.c")
+        self.assertIn("Expand-Archive", source)
+        self.assertIn("install-windows.ps1", source)
+        self.assertIn("%TEMP%", source)
+        self.assertIn("GetTempPathA", source)
+        self.assertIn("/?", source)
+        for banned in ("WinExec", "ShellExecute"):
+            self.assertNotIn(banned, source, msg=f"launcher must stay console-only: {banned}")
+
+    def test_macos_launcher_source(self) -> None:
+        path = self.INSTALLER_DIR / "macos" / "Install SheepFox.command"
+        self.assertTrue(path.is_file())
+        text = read(path)
+        self.assertTrue(text.startswith("#!/bin/bash\n"))
+        self.assertIn("scripts/install-unix.sh", text)
+        self.assertIn('"$@"', text, msg="switches must be forwarded unchanged")
+        self.assertIn("set -euo pipefail", text)
+        # A mounted read-only image can drop the execute bit, so never rely on it.
+        self.assertIn("sh ./scripts/install-unix.sh", text)
+        self.assertIn("if [ -t 0 ]", text, msg="must not block without a terminal")
+        self.assertTrue(path.stat().st_mode & 0o111, msg="the .command must be executable")
+        banner = read(self.INSTALLER_DIR / "macos" / "README.txt")
+        for switch in ("--doctor", "--uninstall", "--strict", "--no-ui", "--low-memory"):
+            self.assertIn(switch, banner)
+
+    def test_readme_documents_the_installers(self) -> None:
+        readme = read(REPO_ROOT / "README.md")
+        for needle in (
+            "SheepFox-Setup-<version>.exe",
+            "SheepFox-<version>.dmg",
+            "Install SheepFox.command",
+            "make installers",
+            "pip install ziglang pycdlib",
+            "/releases/latest",
+        ):
+            self.assertIn(needle, readme, msg=f"README must document {needle}")
+        makefile = read(REPO_ROOT / "Makefile")
+        self.assertIn("build-installers.py --windows", makefile)
+        self.assertIn("build-installers.py --macos", makefile)
+
+    def test_warning_free_launcher_build(self) -> None:
+        text = read(self.BUILD_SCRIPT)
+        for flag in ('"-Wall"', '"-Wextra"', '"-Werror"'):
+            self.assertIn(flag, text, msg=f"the .exe must be built with {flag}")
+        self.assertIn("compiled with warnings", text)
+
+    def test_release_workflow_builds_and_publishes(self) -> None:
+        path = REPO_ROOT / ".github" / "workflows" / "release-installers.yml"
+        self.assertTrue(path.is_file())
+        text = read(path)
+        self.assertIn("windows-latest", text)
+        self.assertIn("macos-latest", text)
+        self.assertIn("build-installers.py --windows", text)
+        self.assertIn("build-installers.py --macos", text)
+        self.assertIn("hdiutil", text)
+        self.assertIn("SheepFox-Setup-*.exe", text)
+        self.assertIn("SheepFox-*.dmg", text)
+        self.assertIn("SheepFox-*.iso", text)
+
+    def test_built_windows_executable(self) -> None:
+        artifacts = sorted(self.DIST_DIR.glob("SheepFox-Setup-*.exe"))
+        if not artifacts:
+            self.skipTest("no .exe built in this checkout")
+        data = artifacts[-1].read_bytes()
+        self.assertEqual(data[:2], b"MZ")
+        pe_offset = int.from_bytes(data[0x3C:0x40], "little")
+        self.assertEqual(data[pe_offset:pe_offset + 4], b"PE\0\0")
+        machine = int.from_bytes(data[pe_offset + 4:pe_offset + 6], "little")
+        self.assertEqual(machine, 0x8664, msg="must be x86-64 Windows")
+        optional = pe_offset + 24
+        magic = int.from_bytes(data[optional:optional + 2], "little")
+        self.assertEqual(magic, 0x20B, msg="PE32+ expected")
+        subsystem = int.from_bytes(data[optional + 68:optional + 70], "little")
+        self.assertEqual(subsystem, 3, msg="console subsystem so switches print to a terminal")
+        # A real zip archive is embedded, and it carries the PowerShell installer.
+        start = data.find(b"PK\x03\x04")
+        self.assertGreater(start, 0, msg="payload zip not found in the executable")
+        import io
+        import zipfile
+
+        payload = zipfile.ZipFile(io.BytesIO(data[start:]))
+        self.assertIn("scripts/install-windows.ps1", payload.namelist())
+        self.assertIn("config/user.js", payload.namelist())
+        self.assertIn("config/modules/01-speedfox.js", payload.namelist())
+        self.assertIn("scripts/install-windows.bat", payload.namelist())
+        mode = payload.getinfo("scripts/install-windows.ps1")
+        self.assertEqual(mode.create_system, 0)
+
+    def test_built_dmg_is_a_valid_udif(self) -> None:
+        artifacts = sorted(self.DIST_DIR.glob("SheepFox-*.dmg"))
+        if not artifacts:
+            self.skipTest("no .dmg built in this checkout")
+        data = artifacts[-1].read_bytes()
+        if "hdiutil" in read(self.BUILD_SCRIPT) and data[-512:-508] != b"koly":
+            # A native hdiutil image (HFS+ UDZO) is fine as-is.
+            self.assertGreater(len(data), 512)
+            return
+        trailer = data[-512:]
+        self.assertEqual(trailer[:4], b"koly")
+        self.assertEqual(int.from_bytes(trailer[4:8], "big"), 4)
+        self.assertEqual(int.from_bytes(trailer[8:12], "big"), 512)
+        data_offset = int.from_bytes(trailer[24:32], "big")
+        data_length = int.from_bytes(trailer[32:40], "big")
+        xml_offset = int.from_bytes(trailer[216:224], "big")
+        xml_length = int.from_bytes(trailer[224:232], "big")
+        self.assertEqual(data_offset, 0)
+        self.assertEqual(xml_offset, data_length)
+        self.assertEqual(xml_offset + xml_length + 512, len(data))
+        self.assertEqual(
+            int.from_bytes(trailer[492:500], "big"), (data_length + 511) // 512
+        )
+        import plistlib
+        import zlib
+
+        xml = data[xml_offset:xml_offset + xml_length]
+        self.assertEqual(int.from_bytes(trailer[360:364], "big"), zlib.crc32(xml) & 0xFFFFFFFF)
+        self.assertEqual(
+            int.from_bytes(trailer[88:92], "big"),
+            zlib.crc32(data[data_offset:data_offset + data_length]) & 0xFFFFFFFF,
+        )
+        resource_fork = plistlib.loads(xml)["resource-fork"]
+        self.assertIn("blkx", resource_fork)
+        mish = resource_fork["blkx"][0]["Data"]
+        self.assertEqual(mish[:4], b"mish")
+        self.assertEqual(int.from_bytes(mish[16:24], "big"), (data_length + 511) // 512)
+
+    def test_built_iso_contains_the_installer(self) -> None:
+        artifacts = sorted(self.DIST_DIR.glob("SheepFox-*.iso"))
+        if not artifacts:
+            self.skipTest("no .iso built in this checkout")
+        data = artifacts[-1].read_bytes()
+        self.assertEqual(data[0x8001:0x8006], b"CD001")
+        self.assertIn(b"Install SheepFox.command", data)
+        self.assertIn(b"install-unix.sh", data)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

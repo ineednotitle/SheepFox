@@ -1,0 +1,164 @@
+name: Release Installers
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-installers-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHONIOENCODING: utf-8
+
+jobs:
+  windows:
+    name: Windows .exe
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the Zig toolchain
+        run: pip install --disable-pip-version-check ziglang pycdlib
+
+      - name: Build the setup executable
+        shell: bash
+        run: python mozbuild/scripts/build-installers.py --windows
+
+      - name: Smoke-test the embedded payload
+        shell: bash
+        run: |
+          python - <<'PY'
+          import io, pathlib, zipfile
+
+          exe = next(pathlib.Path("dist").glob("SheepFox-Setup-*.exe")).read_bytes()
+          assert exe[:2] == b"MZ", "not a PE file"
+          payload = zipfile.ZipFile(io.BytesIO(exe[exe.find(b"PK\x03\x04"):]))
+          names = payload.namelist()
+          for required in ("scripts/install-windows.ps1", "config/user.js", "config/chrome/userChrome.css"):
+              assert required in names, f"payload is missing {required}"
+          print(f"payload ok: {len(names)} files")
+          PY
+
+      - name: Upload the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: SheepFox-Windows
+          path: dist/SheepFox-Setup-*.exe
+          if-no-files-found: error
+
+  macos:
+    name: macOS .dmg
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the ISO writer
+        run: python -m pip install --disable-pip-version-check pycdlib
+
+      - name: Build the disk image with hdiutil
+        run: python mozbuild/scripts/build-installers.py --macos
+
+      - name: Mount-test the image
+        run: |
+          dmg="$(ls dist/SheepFox-*.dmg)"
+          hdiutil verify "$dmg"
+          mountpoint="$(mktemp -d)"
+          hdiutil attach "$dmg" -mountpoint "$mountpoint" -nobrowse -readonly
+          ls -l "$mountpoint"
+          test -x "$mountpoint/Install SheepFox.command"
+          test -f "$mountpoint/SheepFox/config/user.js"
+          hdiutil detach "$mountpoint"
+
+      - name: Upload the disk image
+        uses: actions/upload-artifact@v4
+        with:
+          name: SheepFox-macOS
+          path: dist/SheepFox-*.dmg
+          if-no-files-found: error
+
+  fallback:
+    name: Portable .iso fallback
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the ISO writer
+        run: python -m pip install --disable-pip-version-check pycdlib
+
+      - name: Build the ISO9660 copy of the macOS volume
+        run: python3 mozbuild/scripts/build-installers.py --macos
+
+      - name: Upload the ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: SheepFox-ISO
+          path: dist/SheepFox-*.iso
+          if-no-files-found: error
+
+  publish:
+    name: Attach the installers to the release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, macos, fallback]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download the built installers
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "(SheepFox) Firefox ${{ github.ref_name }}"
+          files: |
+            artifacts/SheepFox-Setup-*.exe
+            artifacts/SheepFox-*.dmg
+            artifacts/SheepFox-*.iso
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          body: |
+            Drop-in installers for (SheepFox) Firefox.
+
+            * **Windows** — `SheepFox-Setup-<version>.exe`. Double-click it. It unpacks
+              the payload to `%TEMP%\sheepfox-setup` and runs the same
+              `scripts\install-windows.ps1` a git checkout would run, so `-System`,
+              `-Strict`, `-NoUI`, `-LowMemory`, `-Uninstall`, `-DryRun`, `-Unprobe`,
+              `-Report` and `-Doctor` all work. `SheepFox-Setup.exe /?` lists them.
+            * **macOS** — `SheepFox-<version>.dmg`. Open it, then double-click
+              **Install SheepFox.command**. Gatekeeper may need
+              *System Settings -> Privacy & Security -> Open Anyway* for an unsigned
+              build; the same `--strict / --no-ui / --uninstall / --low-memory /
+              --dry-run / --doctor / --probe / --report` switches apply.
+            * **Fallback** — `SheepFox-<version>.iso`. Identical contents for hosts
+              that will not mount the UDIF image.
+
+            Every artifact ships the exact files from `config/`; nothing is
+            re-implemented inside the installer.

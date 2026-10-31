@@ -40,3 +40,6 @@ desktop.ini
 .idea/
 .vscode/
 !.vscode/extensions.json
+
+# Installer build output (mozbuild/scripts/build-installers.py)
+dist/

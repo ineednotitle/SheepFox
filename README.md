@@ -97,14 +97,21 @@ SheepFox/
 │       ├── build-configs.py         # module compiler + `--check` gate
 │       ├── fetch-source.sh          # download + SHA-512 verify the pinned tarball
 │       ├── apply-patches.sh         # branding, staging, patches/series
-│       └── build-browser.sh         # mach configure → build → package → inject config
+│       ├── build-browser.sh         # mach configure → build → package → inject config
+│       └── build-installers.py      # dist/SheepFox-Setup-*.exe, SheepFox-*.dmg, *.iso
 │
 ├── patches/                         # verified against FIREFOX_159_0_RELEASE
 │   ├── series
 │   └── 0001…0004-*.patch
+├── installer/                       # MODE 1 — the double-click installers
+│   ├── version.txt                  # the version stamped into the artifact names
+│   ├── windows/launcher.c           # source of SheepFox-Setup-<ver>.exe
+│   └── macos/                       # "Install SheepFox.command" + README.txt
+│
 ├── scripts/                         # install.py, install-unix.sh, install-windows.{bat,ps1}
-├── tests/test_repo.py               # 41 tests, stdlib only
-└── .github/workflows/               # validate-configs.yml, build-sheepfox.yml
+├── tests/test_repo.py               # 77 tests, stdlib only
+└── .github/workflows/               # validate-configs.yml, build-sheepfox.yml,
+                                     #   release-installers.yml
 ```
 
 ---
@@ -271,6 +278,75 @@ On Windows: `.\scripts\install-windows.bat -Uninstall -System`
 
 Timestamped backups are always left in place; restore the newest
 `user.js.sheepfox-backup-*` to get your old profile config back.
+
+---
+
+## Installers: `SheepFox-Setup-<version>.exe` and `SheepFox-<version>.dmg`
+
+Both installers are thin wrappers around the *same* `scripts/` the git checkout
+runs. Nothing is re-implemented inside them, so a fix to `config/` — a preference,
+a policy, `userChrome.css` — reaches the installers the next time they are built,
+and every switch below behaves identically whatever way you install SheepFox.
+
+| Artifact | Platform | What double-clicking it does |
+| --- | --- | --- |
+| `SheepFox-Setup-<version>.exe` | Windows 10/11, x86-64 | Unpacks the payload to `%TEMP%\sheepfox-setup`, then runs `scripts\install-windows.ps1` with your switches |
+| `SheepFox-<version>.dmg` | macOS 11+, Intel & Apple silicon | Mounts a volume holding the payload and **Install SheepFox.command**; runs `scripts/install-unix.sh` |
+| `SheepFox-<version>.iso` | any (fallback) | Same volume as ISO9660/Joliet, for hosts that will not mount the UDIF image |
+
+The executables are built by CI for every `v*` tag and attached to the release:
+<https://github.com/ineednotitle/SheepFox/releases/latest>.
+
+### Using them
+
+**Windows.** Double-click `SheepFox-Setup-<version>.exe`. A console window shows
+the progress and stays readable, so nothing fails silently.
+
+```bat
+:: run it from a terminal and forward any installer switch
+SheepFox-Setup-1.0.0.exe -System -LowMemory
+SheepFox-Setup-1.0.0.exe /?
+```
+
+`/?` prints the switch list (`-System`, `-Strict`, `-LowMemory`, `-NoUI`,
+`-Doctor`, `-Probe`, `-Unprobe`, `-Report`, `-Uninstall`, `-DryRun`). `-System`
+still auto-elevates through UAC exactly like the `.bat` launcher — there is no
+separate "run as administrator" step, and no PowerShell ExecutionPolicy error
+because the launcher always passes `-ExecutionPolicy Bypass -NoProfile`.
+
+**macOS.** Open the `.dmg` and double-click **Install SheepFox.command**. macOS
+attaches an unsigned build with a quarantine flag, so the first launch may need
+Control-click → **Open**, or *System Settings → Privacy & Security → Open Anyway*.
+If the mount is read-only and the execute bit did not survive, the image's
+`README.txt` tells you to run:
+
+```bash
+sh "/Volumes/SheepFox/Install SheepFox.command" --doctor
+```
+
+**Neither installer** writes a registry key, installs a service, starts a
+background process or downloads anything. They copy the same `user.js`,
+`chrome/*.css`, `policies.json` and AutoConfig files as Mode 1, back up whatever
+they replace, and exit. `-Uninstall` / `--uninstall` removes everything again.
+
+### Building them yourself
+
+```bash
+pip install ziglang pycdlib        # Zig cross-compiler + ISO writer
+make installers                    # or: python3 mozbuild/scripts/build-installers.py
+
+# one platform at a time
+python3 mozbuild/scripts/build-installers.py --windows   # -> dist/SheepFox-Setup-<ver>.exe
+python3 mozbuild/scripts/build-installers.py --macos     # -> dist/SheepFox-<ver>.dmg + .iso
+```
+
+`installer/version.txt` is the single source of the version in the file names.
+The `.exe` is a real PE32+ executable compiled from `installer/windows/launcher.c`
+with `zig cc -target x86_64-windows-gnu -Wall -Wextra -Werror`; the payload zip is
+linked in as a byte array, so no runtime toolchain is needed on the target machine.
+On macOS the build uses `hdiutil` for a native HFS+ compressed image; everywhere
+else it writes the ISO9660/Joliet volume with `pycdlib` and wraps it in a UDIF
+container, shipping the `.iso` alongside it.
 
 ---
 

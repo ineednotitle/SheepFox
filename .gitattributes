@@ -8,3 +8,4 @@
 *.patch -text
 *.diff -text
 *.svg text
+*.command text eol=lf

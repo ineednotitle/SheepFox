@@ -8,6 +8,7 @@ TARGET ?= auto
 SHEEPFOX_SRC ?= $(CURDIR)/mozbuild/firefox-src
 
 .PHONY: help build-configs check test test-verbose install install-dry-run \
+        installers installers-windows installers-macos \
         fetch-source patch-source build-browser clean verify
 
 help:
@@ -19,6 +20,8 @@ help:
 	@echo "  make test            Run the full verification suite"
 	@echo "  make install         Apply SheepFox to the detected Firefox profile"
 	@echo "  make install-dry-run Preview every path that would be touched"
+	@echo "  make installers      Build dist/SheepFox-Setup-*.exe + SheepFox-*.dmg + *.iso"
+	@echo "                       (needs: pip install ziglang pycdlib)"
 	@echo ""
 	@echo "Custom fork build (compile (SheepFox) Firefox from upstream source):"
 	@echo "  make fetch-source    Download + SHA-512 verify the pinned Firefox source"
@@ -43,6 +46,15 @@ install:
 
 install-dry-run:
 	$(PYTHON) scripts/install.py --dry-run
+
+installers:
+	$(PYTHON) mozbuild/scripts/build-installers.py
+
+installers-windows:
+	$(PYTHON) mozbuild/scripts/build-installers.py --windows
+
+installers-macos:
+	$(PYTHON) mozbuild/scripts/build-installers.py --macos
 
 fetch-source:
 	bash mozbuild/scripts/fetch-source.sh
