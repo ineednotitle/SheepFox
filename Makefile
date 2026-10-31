@@ -18,9 +18,11 @@ help:
 	@echo "  make build-configs   Compile config/modules/*.js -> user.js + sheepfox.cfg"
 	@echo "  make check           Verify the generated configs are in sync (CI gate)"
 	@echo "  make test            Run the full verification suite"
-	@echo "  make install         Apply SheepFox to the detected Firefox profile"
+	@echo "  make install         Apply SheepFox to every detected Firefox profile"
+	@echo "  make install-zen     Same suite, aimed at Zen Browser (--browser zen)"
 	@echo "  make install-dry-run Preview every path that would be touched"
 	@echo "  make installers      Build dist/SheepFox-Setup-*.exe + SheepFox-*.dmg + *.iso"
+	@echo "                       (plus the Zen-branded setup, which bakes -Zen in)"
 	@echo "                       (needs: pip install ziglang pycdlib)"
 	@echo "  make extension       Build dist/SheepFox-Floating-URL-Bar-*.xpi"
 	@echo "  make extension-check Validate the extension manifest and sources (CI gate)"
@@ -48,6 +50,12 @@ install:
 
 install-dry-run:
 	$(PYTHON) scripts/install.py --dry-run
+
+install-zen:
+	$(PYTHON) scripts/install.py --browser zen
+
+install-zen-dry-run:
+	$(PYTHON) scripts/install.py --browser zen --dry-run
 
 installers:
 	$(PYTHON) mozbuild/scripts/build-installers.py

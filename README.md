@@ -33,7 +33,7 @@ SheepFox gives you both halves, in one repository, in two independent modes:
 
 | | What it gives you | Works on |
 | :--- | :--- | :--- |
-| **Mode 1 — Drop-in suite** | Modular prefs → `user.js`, a system AutoConfig (`sheepfox.cfg`), and **SheepShields** enterprise policy that preinstalls **uBlock Origin + Decentraleyes** | Any stock Firefox on Windows, Linux, macOS (standard, Flatpak, Snap) |
+| **Mode 1 — Drop-in suite** | Modular prefs → `user.js`, a system AutoConfig (`sheepfox.cfg`), and **SheepShields** enterprise policy that preinstalls **uBlock Origin + Decentraleyes** | Any stock Firefox on Windows, Linux, macOS (standard, Flatpak, Snap) — **and Zen Browser**, see [below](#zen-browser--the-same-suite-aimed-at-zen) |
 | **Mode 2 — Fork scaffold** | Branding, mozconfigs, a verified patch series and CI to compile a standalone **SheepFox** binary from pinned Mozilla source with cross-language LTO, `x86-64-v3`, LLD and optional PGO | Build host: Linux / Windows (MozillaBuild) / macOS |
 
 Mode 1 takes about ten seconds. Mode 2 takes about an hour of CPU and 40 GB of disk.
@@ -106,7 +106,7 @@ SheepFox/
 ├── installer/                       # MODE 1 — the double-click installers
 │   ├── version.txt                  # the version stamped into the artifact names
 │   ├── windows/launcher.c           # source of SheepFox-Setup-<ver>.exe
-│   └── macos/                       # "Install SheepFox.command" + README.txt
+│   └── macos/                       # "Install SheepFox.command", "Install SheepFox for Zen.command"
 │
 ├── extensions/floating-urlbar/      # the optional Floating URL Bar WebExtension
 │   ├── manifest.json                # MV3, Gecko id floating-urlbar@sheepfox
@@ -116,8 +116,8 @@ SheepFox/
 │   ├── content.js / window.js       # in-page overlay / popup-window surface
 │   └── search.html, icons/bar.svg
 │
-├── scripts/                         # install.py, install-unix.sh, install-windows.{bat,ps1}
-├── tests/test_repo.py               # 112 tests, stdlib only (node/jsdom for the extension)
+├── scripts/                         # install.py, install{-unix.sh,-zen.sh,-windows.{bat,ps1},-zen.bat}
+├── tests/test_repo.py               # 122 tests, stdlib only (node/jsdom for the extension)
 ├── tests/extension/core.test.js     # 26 node tests: URL parsing, ranking, bookmark tiles
 ├── tests/extension/background.test.js  # 7 node tests: toolbar tree, message routing
 ├── tests/extension/ui.test.js       # 19 jsdom tests: shelf, folders, rows, keyboard, cleanup
@@ -358,6 +358,7 @@ and every switch below behaves identically whatever way you install SheepFox.
 | Artifact | Platform | What double-clicking it does |
 | --- | --- | --- |
 | `SheepFox-Setup-<version>.exe` | Windows 10/11, x86-64 | Unpacks the payload to `%TEMP%\sheepfox-setup`, then runs `scripts\install-windows.ps1` with your switches |
+| `SheepFox-Zen-Setup-<version>.exe` | Windows 10/11, x86-64 | The same launcher with `-Zen` baked in: configures Zen Browser instead of Firefox |
 | `SheepFox-<version>.dmg` | macOS 11+, Intel & Apple silicon | Mounts a volume holding the payload and **Install SheepFox.command**; runs `scripts/install-unix.sh` |
 | `SheepFox-<version>.iso` | any (fallback) | Same volume as ISO9660/Joliet, for hosts that will not mount the UDIF image |
 
@@ -415,6 +416,56 @@ linked in as a byte array, so no runtime toolchain is needed on the target machi
 On macOS the build uses `hdiutil` for a native HFS+ compressed image; everywhere
 else it writes the ISO9660/Joliet volume with `pycdlib` and wraps it in a UDIF
 container, shipping the `.iso` alongside it.
+
+---
+
+## Zen Browser — the same suite, aimed at Zen
+
+Zen is Firefox underneath: same engine, same `prefs.js`, same `user.js` parser,
+same enterprise policy engine. So it takes **exactly the same configuration** —
+only three things differ, and the installer knows all three.
+
+```bash
+./scripts/install-zen.sh              # Linux / macOS: prefs + policy, every Zen profile
+python3 scripts/install.py --browser zen
+make install-zen
+
+.\scripts\install-zen.bat             # Windows (bypasses ExecutionPolicy for you)
+.\scripts\install-windows.bat -Zen -UI
+SheepFox-Zen-Setup-<version>.exe      # or double-click this
+```
+
+| | Firefox | Zen Browser |
+| :--- | :--- | :--- |
+| Profile folder | `%APPDATA%\Mozilla\Firefox`, `~/.mozilla/firefox`, `~/Library/Application Support/Firefox` | `%APPDATA%\zen`, `~/.zen` **or** `$XDG_CONFIG_HOME/zen` (Zen ≥ 1.18.6b), and the Flatpak sandbox |
+| Installation folder | `C:\Program Files\Mozilla Firefox`, `/usr/lib/firefox`, `Firefox.app` | `%LOCALAPPDATA%\Programs\zen` (the per-user installer), `/opt/zen-browser-bin`, `/usr/lib/zen-browser`, `Zen.app` — **not** `/opt/zen-browser`, which no package owns and Zen never reads |
+| The floating pill | **on by default** | **opt-in** (`--ui` / `-UI`) — Zen already ships its own floating omnibox |
+| `policies.json` | written, packaging policies preserved | written, packaging policies preserved; on Linux `--policy-dir /etc/zen/policies` survives package upgrades |
+
+**Everything else is identical**: the same 132 prefs, the same SheepShields policy,
+the same uBlock Origin + Decentraleyes preinstall, the same `--strict`,
+`--low-memory`, `--doctor`, `--probe`, `--report` and `--uninstall` behaviour.
+
+Two Zen-specific details that would otherwise bite you:
+
+* **Policies are merged, not replaced.** A packaged Zen ships its own
+  `distribution/policies.json` (`DisableAppUpdate`, `DefaultSerialGuardSetting`).
+  Taking that file over would let the browser update itself behind the package
+  manager, so SheepFox keeps every entry it does not set, and `--uninstall`
+  removes only its own — the packager's entries stay.
+* **`/etc/zen/policies` wins on Linux.** Zen reads
+  `/etc/zen/policies/policies.json` *instead of* the file in its installation
+  folder when it exists, and a package upgrade rewrites the latter. If you want
+  the policy to survive `pacman -Syu`, use
+  `sudo ./scripts/install-zen.sh --system --policy-dir /etc/zen/policies`.
+
+`--browser auto` (the default) installs into **every** browser it finds — Firefox
+and Zen both, if both are there. Pin one with `--browser firefox` / `--browser zen`.
+
+> Verified end to end on disk (profile discovery incl. the XDG and Flatpak roots,
+> policy merge, `--ui`, doctor, uninstall) by the test suite. The *visual* result
+> of the pill in Zen is not asserted here: Zen styles its own `#urlbar`, which is
+> why the pill is opt-in rather than a default.
 
 ---
 
@@ -526,7 +577,7 @@ Full details, the permission rationale and the design notes are in
 ```bash
 make build-configs     # regenerate user.js + sheepfox.cfg from config/modules/*.js
 make check             # fail if either generated file is stale
-make test              # 112 tests (stdlib unittest + node/jsdom for the extension)
+make test              # 122 tests (stdlib unittest + node/jsdom for the extension)
 make extension-check   # validate the extension manifest and sources
 make verify            # check + extension-check + test
 ```
@@ -608,6 +659,8 @@ python3 scripts/install.py --report report.txt
 | Windows Store Firefox | profile lives under `%LOCALAPPDATA%\Packages\Mozilla.Firefox_*` | handled automatically now; `-Doctor` prints the profile it uses (override with `-ProfilePath`) |
 | Doctor flags "stale" | profile has an older copy of the CSS | re-run the installer, then restart Firefox |
 | Need proof CSS loads at all | `userChrome.css` may not be read | focus the bar (`Ctrl+L`) or open a new tab and look for the **"SheepFox UI"** badge in the corner, or run `.\scripts\install-windows.bat -Probe` → the whole top strip of the window turns red ⇒ CSS loads. Remove with `-Unprobe` |
+| Installed into Zen, nothing changed | Zen's pill is opt-in (`--ui`); the prefs and policy apply regardless — check `about:policies` and `about:config` |
+| Zen policy "installed" but `about:policies` is empty | on Linux, `/etc/zen/policies/policies.json` replaces the one in the install folder — install with `--policy-dir /etc/zen/policies` |
 | Copied a floating-urlbar snippet, nothing happens | a default `@namespace ...xul` kills every `#urlbar` rule (the bar is HTML since Firefox 140) | delete the `@namespace` line — SheepFox's own sheet has none |
 
 Prove *where* your profile is:
@@ -667,6 +720,10 @@ default the user may still change. That is the difference between "private by de
 ---
 
 ## Known trade-offs (read before filing a bug)
+
+* **The floating pill is not installed into Zen by default.** Zen already ships its own floating
+  omnibox and styles `#urlbar` itself; stacking SheepFox's pill on top is a choice, not a default.
+  `--ui` / `-UI` installs it. Everything else — prefs, policy, extensions — is identical.
 
 * **Disk cache is off** (`browser.cache.disk.enable = false`) in favour of a 256 MB RAM cache.
   On machines with less than ~4 GB RAM, re-enable it via

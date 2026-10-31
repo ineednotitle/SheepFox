@@ -28,6 +28,7 @@ import sys
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
+from unittest import mock
 import zipfile
 from pathlib import Path
 
@@ -559,6 +560,219 @@ class TestFloatingSearchUI(unittest.TestCase):
         self.assertIn("userChrome.css", ps1)
         self.assertIn('Join-Path $profile "chrome\\$name"', ps1)
         self.assertIn("foreach ($profile in $Profiles)", ps1, msg="must install into every profile")
+
+
+class TestZenBrowserTarget(unittest.TestCase):
+    """Zen Browser is Firefox underneath: same suite, its own folders."""
+
+    INSTALLER = REPO_ROOT / "scripts" / "install.py"
+
+    @staticmethod
+    def _module():
+        spec = importlib.util.spec_from_file_location("sheepfox_install_zen", TestZenBrowserTarget.INSTALLER)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    @staticmethod
+    def _run(home: Path, *arguments: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(TestZenBrowserTarget.INSTALLER), *arguments],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=dict(os.environ, HOME=str(home)),
+        )
+
+    @staticmethod
+    def _zen_home(tmp: Path, *, firefox: bool = False) -> tuple[Path, Path, Path]:
+        """A fake home with one Zen profile and a Zen installation folder."""
+        home = tmp / "home"
+        profile = home / ".zen" / "abc.default (release)"
+        profile.mkdir(parents=True)
+        (home / ".zen" / "profiles.ini").write_text(
+            "[Profile0]\nName=default\nIsRelative=1\nPath=abc.default (release)\nDefault=1\n",
+            encoding="utf-8",
+        )
+        install = tmp / "zen"
+        (install / "distribution").mkdir(parents=True)
+        (install / "application.ini").write_text("[App]\nName=Zen\nVersion=1.23.3b\n", encoding="utf-8")
+        if firefox:
+            ff_profile = home / ".mozilla" / "firefox" / "ff.default-release"
+            ff_profile.mkdir(parents=True)
+            (home / ".mozilla" / "firefox" / "profiles.ini").write_text(
+                "[Profile0]\nName=default-release\nIsRelative=1\nPath=ff.default-release\nDefault=1\n",
+                encoding="utf-8",
+            )
+        return home, profile, install
+
+    def test_zen_profiles_are_found_where_zen_puts_them(self) -> None:
+        """~/.zen is only one of Zen's profile roots; XDG is the new default."""
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            legacy = home / ".zen" / "legacy.profile"
+            xdg = home / ".config" / "zen" / "xdg.profile"
+            for profile in (legacy, xdg):
+                profile.mkdir(parents=True, exist_ok=True)
+                (profile.parent / "profiles.ini").write_text(
+                    f"[Profile0]\nName=default\nIsRelative=1\nPath={profile.name}\nDefault=1\n",
+                    encoding="utf-8",
+                )
+            result = self._run(home, "--browser", "zen", "--dry-run")
+            self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+            self.assertIn(str(legacy), result.stdout)
+            self.assertIn(str(xdg), result.stdout, msg="Zen >= 1.18.6b keeps profiles in $XDG_CONFIG_HOME/zen")
+            self.assertIn("Zen Browser", result.stdout)
+
+    def test_the_pill_is_opt_in_for_zen_and_installed_with_ui(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home, profile, install = self._zen_home(Path(tmp))
+            first = self._run(home, "--browser", "zen", "--zen-dir", str(install))
+            self.assertEqual(first.returncode, 0, msg=first.stdout + first.stderr)
+            self.assertTrue((profile / "user.js").is_file(), "the prefs are the whole point")
+            self.assertFalse(
+                (profile / "chrome" / "userChrome.css").exists(),
+                msg="Zen has its own omnibox; the pill must not be forced on it",
+            )
+            self.assertIn("UI theme not installed", first.stdout)
+
+            second = self._run(home, "--browser", "zen", "--zen-dir", str(install), "--ui")
+            self.assertEqual(second.returncode, 0, msg=second.stdout + second.stderr)
+            css = profile / "chrome" / "userChrome.css"
+            self.assertTrue(css.is_file(), msg="--ui must install the pill")
+            self.assertIn("#urlbar", css.read_text(encoding="utf-8"))
+
+    def test_zen_keeps_the_policies_its_package_ships(self) -> None:
+        """AUR/Flatpak Zen ships DisableAppUpdate; losing it is a real regression."""
+        with tempfile.TemporaryDirectory() as tmp:
+            home, profile, install = self._zen_home(Path(tmp))
+            packaged = install / "distribution" / "policies.json"
+            packaged.write_text(
+                json.dumps({"policies": {"DisableAppUpdate": True, "DefaultSerialGuardSetting": 3}}),
+                encoding="utf-8",
+            )
+            result = self._run(home, "--browser", "zen", "--zen-dir", str(install))
+            self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+
+            written = json.loads(packaged.read_text(encoding="utf-8"))["policies"]
+            self.assertIs(written["DisableAppUpdate"], True, msg="the package's update policy must survive")
+            self.assertEqual(written["DefaultSerialGuardSetting"], 3)
+            self.assertIn("uBlock0@raymondhill.net", written["ExtensionSettings"])
+            self.assertIs(written["DisableTelemetry"], True)
+            self.assertIn("[KEEP]   Preserved 2 existing policy entries", result.stdout)
+
+            # And --uninstall has to give the file back to the packager.
+            removed = self._run(home, "--browser", "zen", "--zen-dir", str(install), "--uninstall")
+            self.assertEqual(removed.returncode, 0, msg=removed.stdout + removed.stderr)
+            remaining = json.loads(packaged.read_text(encoding="utf-8"))["policies"]
+            self.assertIs(remaining["DisableAppUpdate"], True)
+            self.assertNotIn("ExtensionSettings", remaining)
+            self.assertNotIn("DisableTelemetry", remaining)
+            self.assertFalse((profile / "user.js").exists())
+
+    def test_zen_doctor_is_green_without_the_pill(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home, profile, install = self._zen_home(Path(tmp))
+            self._run(home, "--browser", "zen", "--zen-dir", str(install))
+            result = self._run(home, "--browser", "zen", "--zen-dir", str(install), "--doctor")
+            self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+            self.assertIn("=== (SheepFox) Zen Browser doctor ===", result.stdout)
+            self.assertIn("[OK  ] user.js present", result.stdout)
+            self.assertIn("[info] UI theme not installed", result.stdout)
+            self.assertNotIn("[FAIL]", result.stdout)
+            self.assertIn("extension preinstall (uBlock Origin + Decentraleyes)", result.stdout)
+
+    def test_a_directory_that_is_not_zen_is_never_written_to(self) -> None:
+        """policy files must not land in a folder that merely has the right name."""
+        module = self._module()
+        with tempfile.TemporaryDirectory() as tmp:
+            decoy = Path(tmp) / "zen"
+            (decoy / "distribution").mkdir(parents=True)
+            (decoy / "some-other-browser.ini").write_text("[App]\nName=Other\n", encoding="utf-8")
+            self.assertFalse(module.looks_like_zen(decoy))
+            real = Path(tmp) / "real"
+            real.mkdir()
+            (real / "application.ini").write_text("[App]\nName=Zen Browser\n", encoding="utf-8")
+            self.assertTrue(module.looks_like_zen(real))
+            with mock.patch.object(module, "candidate_zen_dirs", return_value=[decoy, real]):
+                self.assertEqual(module.detect_zen_dir(), real)
+
+    def test_auto_mode_configures_both_browsers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home, zen_profile, install = self._zen_home(Path(tmp), firefox=True)
+            ff_profile = home / ".mozilla" / "firefox" / "ff.default-release"
+            result = self._run(home, "--zen-dir", str(install), "--dry-run")
+            self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+            self.assertIn("=== (SheepFox) Firefox Installer ===", result.stdout)
+            self.assertIn("=== (SheepFox) Zen Browser Installer ===", result.stdout)
+            self.assertIn(str(ff_profile / "user.js"), result.stdout)
+            self.assertIn(str(zen_profile / "user.js"), result.stdout)
+
+    def test_browser_flag_pins_one_browser(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home, zen_profile, install = self._zen_home(Path(tmp), firefox=True)
+            result = self._run(home, "--browser", "firefox", "--dry-run")
+            self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+            self.assertIn("=== (SheepFox) Firefox Installer ===", result.stdout)
+            self.assertNotIn("Zen Browser Installer", result.stdout)
+            self.assertNotIn(str(zen_profile), result.stdout)
+
+    def test_zen_wrappers_and_setup_exist(self) -> None:
+        unix = REPO_ROOT / "scripts" / "install-zen.sh"
+        self.assertTrue(unix.is_file())
+        self.assertIn("--browser zen", read(unix))
+        self.assertTrue(os.access(unix, os.X_OK), msg="the shell wrapper has to be executable")
+
+        bat = REPO_ROOT / "scripts" / "install-zen.bat"
+        raw = bat.read_bytes()
+        self.assertNotIn(b"\x00", raw, msg="install-zen.bat must be UTF-8, not UTF-16")
+        self.assertIn(b"\r\n", raw, msg="Windows launchers must stay CRLF")
+        self.assertIn(b"-Zen", raw)
+        self.assertIn(b"ExecutionPolicy Bypass", raw)
+
+        command = REPO_ROOT / "installer" / "macos" / "Install SheepFox for Zen.command"
+        self.assertTrue(command.is_file())
+        self.assertIn("install-zen.sh", read(command))
+
+        script = read(REPO_ROOT / "mozbuild" / "scripts" / "build-installers.py")
+        self.assertIn("SheepFox-Zen-Setup", script)
+        self.assertIn("SHEEPFOX_DEFAULT_ARGS_", script)
+        self.assertIn('"scripts/install-zen.sh"', script)
+        launcher = read(REPO_ROOT / "installer" / "windows" / "launcher.c")
+        self.assertIn("SHEEPFOX_BRAND_", launcher)
+        self.assertIn("SHEEPFOX_DEFAULT_ARGS_", launcher)
+
+    def test_the_windows_script_understands_zen(self) -> None:
+        raw = (REPO_ROOT / "scripts" / "install-windows.ps1").read_bytes()
+        self.assertNotIn(b"\x00", raw)
+        self.assertIn(b"\r\n", raw, msg="PowerShell scripts must stay CRLF")
+        text = raw.decode("utf-8")
+        for token in ("[switch]$Zen", "[switch]$UI", '"Zen Browser"', "Programs\\zen", "Merge-PolicyDocument"):
+            self.assertIn(token, text)
+        # The brand must not be hardcoded into the messages any more.
+        self.assertIn("$Brand", text)
+        self.assertNotIn('=== (SheepFox) Firefox Windows Installer ===', text)
+
+    def test_the_docs_and_the_release_workflow_cover_zen(self) -> None:
+        readme = read(REPO_ROOT / "README.md")
+        for token in (
+            "--browser zen",
+            "install-zen.sh",
+            "/opt/zen-browser-bin",
+            "/etc/zen/policies",
+            "XDG_CONFIG_HOME",
+            "--policy-dir",
+            "Zen Browser",
+        ):
+            self.assertIn(token, readme)
+
+        workflow = read(REPO_ROOT / ".github" / "workflows" / "release-installers.yml")
+        self.assertIn("SheepFox-Zen-Setup-*.exe", workflow)
+        self.assertIn("Install SheepFox for Zen.command", workflow)
+        self.assertIn("--policy-dir", workflow)
+
+        mac_readme = read(REPO_ROOT / "installer" / "macos" / "README.txt")
+        self.assertIn("Install SheepFox for Zen.command", mac_readme)
 
 
 class TestFloatingUrlBarExtension(unittest.TestCase):

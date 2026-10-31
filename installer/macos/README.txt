@@ -39,6 +39,21 @@ Reverting
   --uninstall removes user.js and the two CSS files. Backups written by the
   installer are left next to them as <file>.sheepfox-backup-<timestamp>.
 
+Zen Browser
+-----------
+  Same suite, aimed at Zen: double-click "Install SheepFox for Zen.command".
+  It writes the same user.js into your Zen profiles
+  (~/Library/Application Support/zen) and the SheepShields policy into
+  Zen.app/Contents/Resources.
+
+  Two differences: the floating pill is NOT installed (Zen has its own
+  floating omnibox - add --ui to get SheepFox's as well), and any
+  policies.json Zen shipped with is merged with ours instead of replaced.
+
+    sh "Install SheepFox for Zen.command" --ui        pill + everything else
+    sh "Install SheepFox for Zen.command" --doctor    diagnose
+    sh "Install SheepFox for Zen.command" --uninstall remove everything
+
 Notes
 -----
   * The disk image is unsigned. Control-click → Open the first time.

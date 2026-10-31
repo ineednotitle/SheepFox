@@ -6,7 +6,10 @@
 #   python3 mozbuild/scripts/build-installers.py --windows  # .exe only
 #   python3 mozbuild/scripts/build-installers.py --macos    # .dmg + .iso only
 #
-# Windows  -> dist/SheepFox-Setup-<version>.exe
+# Windows  -> dist/SheepFox-Setup-<version>.exe  and
+#             dist/SheepFox-Zen-Setup-<version>.exe
+#             The Zen one is the same launcher compiled with -Zen baked in, so
+#             it configures Zen Browser without the user passing a switch.
 #             A real PE32+ executable: the whole payload is embedded as a byte
 #             array, and at run time it unpacks to %TEMP% and runs the same
 #             scripts\install-windows.ps1 a git checkout would run. Needs the
@@ -46,8 +49,10 @@ VERSION_FILE = INSTALLER_DIR / "version.txt"
 PAYLOAD_FILES = (
     "scripts/install.py",
     "scripts/install-unix.sh",
+    "scripts/install-zen.sh",
     "scripts/install-windows.ps1",
     "scripts/install-windows.bat",
+    "scripts/install-zen.bat",
     "config/user.js",
     "config/modules/01-speedfox.js",
     "config/modules/02-shieldfox.js",
@@ -69,7 +74,15 @@ PAYLOAD_FILES = (
 #: Files that must stay executable once unpacked on macOS.
 EXECUTABLE = (
     "scripts/install-unix.sh",
+    "scripts/install-zen.sh",
     "Install SheepFox.command",
+    "Install SheepFox for Zen.command",
+)
+
+#: The double-click entry points that sit at the root of the macOS volume.
+MACOS_COMMANDS = (
+    "Install SheepFox.command",
+    "Install SheepFox for Zen.command",
 )
 
 BLOCK_SIZE = 512
@@ -153,16 +166,20 @@ def c_byte_array(data: bytes, symbol: str, indent: int = 12) -> str:
     )
 
 
-def build_windows(zig: str, version: str) -> Path:
+def build_windows(zig: str, version: str, browser: str = "firefox") -> Path:
+    """Compile the launcher. *browser* "zen" bakes -Zen into the setup."""
     DIST_DIR.mkdir(exist_ok=True)
     payload = build_payload_zip()
+    zen = browser == "zen"
+    target_name = f"SheepFox-Zen-Setup-{version}.exe" if zen else f"SheepFox-Setup-{version}.exe"
+    defines = ['-DSHEEPFOX_BRAND_="Zen Browser"', '-DSHEEPFOX_DEFAULT_ARGS_=" -Zen"'] if zen else []
     with tempfile.TemporaryDirectory() as tmp:
         tmpdir = Path(tmp)
         (tmpdir / "payload.c").write_text(
             c_byte_array(payload, "sheepfox_payload"), encoding="utf-8"
         )
         shutil.copy2(INSTALLER_DIR / "windows" / "launcher.c", tmpdir / "launcher.c")
-        target = DIST_DIR / f"SheepFox-Setup-{version}.exe"
+        target = DIST_DIR / target_name
         command = [
             zig,
             "cc",
@@ -173,6 +190,7 @@ def build_windows(zig: str, version: str) -> Path:
             "-Wall",
             "-Wextra",
             "-Werror",
+        ] + defines + [
             "-o",
             str(target),
             str(tmpdir / "launcher.c"),
@@ -201,7 +219,8 @@ def build_volume_tree(root: Path) -> None:
         destination = root / "SheepFox" / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
-    shutil.copy2(INSTALLER_DIR / "macos" / "Install SheepFox.command", root / "Install SheepFox.command")
+    for command in MACOS_COMMANDS:
+        shutil.copy2(INSTALLER_DIR / "macos" / command, root / command)
     shutil.copy2(INSTALLER_DIR / "macos" / "README.txt", root / "README.txt")
     for relative in EXECUTABLE:
         for candidate in (root / relative, root / "SheepFox" / relative):
@@ -221,7 +240,9 @@ def _iso_component(name: str, used: set[tuple[str, str]]) -> str:
     counter = 1
     while (candidate, suffix) in used:
         counter += 1
-        candidate = f"{stem[:5]}~{counter}"[:8]
+        # `~` is the classic ISO9660 collision marker, but pycdlib only accepts
+        # D1 characters (A-Z, 0-9, _) when it writes the record.
+        candidate = f"{stem[:6]}_{counter}"[:8]
     used.add((candidate, suffix))
     return f"{candidate}.{suffix}" if suffix else candidate
 
@@ -467,7 +488,9 @@ def main() -> int:
 
     artifacts: list[Path] = []
     if both or args.windows:
-        artifacts.append(build_windows(find_zig(args.zig), version))
+        zig = find_zig(args.zig)
+        artifacts.append(build_windows(zig, version, "firefox"))
+        artifacts.append(build_windows(zig, version, "zen"))
     if both or args.macos:
         artifacts.extend(build_macos(version))
 

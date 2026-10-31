@@ -35,6 +35,16 @@ extern const unsigned int sheepfox_payload_size;
 #define SHEEPFOX_MAX_PATH_ 32768
 #define SHEEPFOX_EXIT_FAIL 1
 
+/* The same launcher builds both setups. build-installers.py overrides these for
+   the Zen-branded .exe, which pre-applies -Zen so a Zen user never has to know
+   the switch exists. */
+#ifndef SHEEPFOX_BRAND_
+#define SHEEPFOX_BRAND_ "Firefox"
+#endif
+#ifndef SHEEPFOX_DEFAULT_ARGS_
+#define SHEEPFOX_DEFAULT_ARGS_ ""
+#endif
+
 static void say(const char *text) {
   fputs(text, stdout);
   fputc('\n', stdout);
@@ -103,8 +113,8 @@ int main(int argc, char **argv) {
   int code;
 
   say("");
-  say("  (SheepFox) Firefox - Windows setup");
-  say("  ---------------------------------");
+  say("  (SheepFox) " SHEEPFOX_BRAND_ " - Windows setup");
+  say("  ---------------------------------------------");
   say("");
 
   for (index = 1; index < argc; ++index) {
@@ -123,6 +133,8 @@ int main(int argc, char **argv) {
       say("  -Report       write sheepfox-report.txt");
       say("  -Uninstall    remove everything SheepFox installed");
       say("  -DryRun       show what would happen, change nothing");
+      say("  -Zen          configure Zen Browser instead of Firefox");
+      say("  -UI           install the floating-search theme into Zen too");
       say("");
       say("Every switch is forwarded to scripts\\install-windows.ps1.");
       return 0;
@@ -161,7 +173,7 @@ int main(int argc, char **argv) {
     char quoted[SHEEPFOX_MAX_PATH_ * 2];
     /* Forward the caller's switches unchanged. */
     wsprintfA(quoted,
-              "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"%s\"",
+              "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"%s\"" SHEEPFOX_DEFAULT_ARGS_,
               script_path);
     for (index = 1; index < argc; ++index) {
       strncat(quoted, " ", sizeof(quoted) - strlen(quoted) - 1);
@@ -173,7 +185,7 @@ int main(int argc, char **argv) {
 
   if (code == 0) {
     say("");
-    say("  Done. Restart Firefox to activate SheepFox.");
+    say("  Done. Restart " SHEEPFOX_BRAND_ " to activate SheepFox.");
   } else {
     printf("\n  Installer exited with code %d.\n", code);
   }

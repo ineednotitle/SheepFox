@@ -32,19 +32,24 @@ jobs:
       - name: Install the Zig toolchain
         run: pip install --disable-pip-version-check ziglang pycdlib
 
-      - name: Build the setup executable
+      - name: Build and verify the setup executables
         shell: bash
+        # Builds both: SheepFox-Setup (Firefox) and SheepFox-Zen-Setup (-Zen baked
+        # in). The script refuses to finish if either fails its own PE check.
         run: python mozbuild/scripts/build-installers.py --windows
 
-      - name: Verify the built executable
+      - name: Confirm both setups were produced
         shell: bash
-        run: python mozbuild/scripts/build-installers.py --windows
+        run: |
+          ls -l dist
+          test -n "$(ls dist/SheepFox-Setup-*.exe)"
+          test -n "$(ls dist/SheepFox-Zen-Setup-*.exe)"
 
-      - name: Upload the installer
+      - name: Upload the installers
         uses: actions/upload-artifact@v4
         with:
           name: SheepFox-Windows
-          path: dist/SheepFox-Setup-*.exe
+          path: dist/SheepFox*-Setup-*.exe
           if-no-files-found: error
 
   macos:
@@ -74,6 +79,7 @@ jobs:
           hdiutil attach "$dmg" -mountpoint "$mountpoint" -nobrowse -readonly
           ls -l "$mountpoint"
           test -x "$mountpoint/Install SheepFox.command"
+          test -x "$mountpoint/Install SheepFox for Zen.command"
           test -f "$mountpoint/SheepFox/config/user.js"
           hdiutil detach "$mountpoint"
 
@@ -155,13 +161,14 @@ jobs:
           name: "(SheepFox) Firefox ${{ github.ref_name }}"
           files: |
             artifacts/SheepFox-Setup-*.exe
+            artifacts/SheepFox-Zen-Setup-*.exe
             artifacts/SheepFox-*.dmg
             artifacts/SheepFox-*.iso
             artifacts/SheepFox-Floating-URL-Bar-*.xpi
           fail_on_unmatched_files: true
           generate_release_notes: true
           body: |
-            Drop-in installers for (SheepFox) Firefox.
+            Drop-in installers for (SheepFox) Firefox and Zen Browser.
 
             The install writes `user.js` plus **`chrome/userChrome.css`** into every Firefox
             profile it finds: that is the floating Zen/Arc-style search bar on `Ctrl+T` /
@@ -190,6 +197,30 @@ jobs:
 
             Every artifact ships the exact files from `config/`; nothing is
             re-implemented inside the installer.
+
+            ### Zen Browser: same suite, same scripts
+
+            Zen is Firefox underneath, so it takes the same `user.js`. Three
+            differences, all deliberate:
+
+            * **`SheepFox-Zen-Setup-<version>.exe`** (or
+              `scripts/install-zen.sh` / `scripts/install-zen.bat` /
+              `Install SheepFox for Zen.command` on the disk image) targets Zen's
+              own folders: `%APPDATA%\zen`, `~/.zen` or `$XDG_CONFIG_HOME/zen`,
+              and the Flatpak sandbox. `--browser zen` does the same from
+              `install.py`; a plain run installs into every browser it finds.
+            * **The floating pill is opt-in there** (`--ui` / `-UI`). Zen already
+              ships its own floating omnibox and its own chrome; the numbers,
+              the policy and the extensions are unaffected.
+            * **A packaged Zen keeps its own policies.** Zen ships
+              `distribution/policies.json` with `DisableAppUpdate` and friends.
+              SheepFox merges instead of overwriting, and `--uninstall` removes
+              only SheepFox's entries - losing `DisableAppUpdate` would let Zen
+              update itself behind the package manager.
+
+            On Linux, Zen reads `/etc/zen/policies/policies.json` *instead of*
+            the one in its installation folder, and a package upgrade rewrites
+            the latter. `--policy-dir /etc/zen/policies` writes there instead.
 
             ### Floating URL Bar extension (optional)
 

@@ -1,13 +1,23 @@
 #!/usr/bin/env python3
 """
 (SheepFox) Firefox — Cross-Platform Drop-In Installer & Profile Manager
-Applies SheepFox speed & privacy configurations to stock Mozilla Firefox:
+Applies SheepFox speed & privacy configurations to Mozilla Firefox *and*
+Zen Browser (the same Gecko engine, a different profile folder):
   1. Per-profile `user.js` (+ optional personal or `--strict` overrides)
   2. Per-profile UI theme: `chrome/userChrome.css` + `chrome/userContent.css`
-     (the floating Zen/Arc-style new-tab search pill; skip with --no-ui)
+     (the floating Zen/Arc-style new-tab search pill; skip with --no-ui).
+     Firefox: on by default. Zen: opt-in with --ui, because Zen already has
+     its own floating omnibox and its own chrome.
   3. SheepShields Enterprise Policy (`distribution/policies.json`), which
-     preinstalls uBlock Origin + Decentraleyes and locks the privacy defaults
+     preinstalls uBlock Origin + Decentraleyes and locks the privacy defaults.
+     Existing policies in that file are preserved, not overwritten - a packaged
+     Zen ships its own (DisableAppUpdate, ...) and losing those would be worse
+     than skipping the install.
   4. Optional `--system` AutoConfig (`sheepfox.cfg` + `local-settings.js`)
+
+Which browser: `--browser auto` (default) installs into every browser it finds,
+`firefox` / `zen` pin one, `both` means both. `--zen` is shorthand for
+`--browser zen`.
 """
 
 from __future__ import annotations
@@ -36,6 +46,18 @@ POLICIES_SRC = REPO_ROOT / "config" / "distribution" / "policies.json"
 AUTOCONFIG_CFG_SRC = REPO_ROOT / "config" / "autoconfig" / "sheepfox.cfg"
 LOCAL_SETTINGS_SRC = REPO_ROOT / "config" / "autoconfig" / "defaults" / "pref" / "local-settings.js"
 CHROME_SRC_DIR = REPO_ROOT / "config" / "chrome"
+
+#: The browsers this installer knows about. Zen is Firefox underneath, so it
+#: takes the same user.js - only the profile folder, the installation folder,
+#: the policy file it reads and the UI default differ.
+FIREFOX = "firefox"
+ZEN = "zen"
+BROWSERS = (FIREFOX, ZEN)
+
+
+def browser_label(browser: str) -> str:
+    """Human name for log lines and the doctor."""
+    return "Zen Browser" if browser == ZEN else "Firefox"
 #: Profile-level CSS: the floating new-tab search pill (Zen/Arc style)
 UI_FILES = ("userChrome.css", "userContent.css")
 #: Extensions SheepShields preinstalls through the policy file. The names are
@@ -97,6 +119,89 @@ def candidate_profile_roots() -> list[Path]:
     ]
 
 
+def candidate_zen_profile_roots() -> list[Path]:
+    """Everywhere Zen keeps profiles.ini on this platform.
+
+    Zen kept profiles in ~/.zen for years; new Linux installs (1.18.6b and
+    later) use $XDG_CONFIG_HOME/zen, and Flatpak keeps its own copy inside the
+    sandbox's app folder. The Flatpak paths are listed for both layouts because
+    the layout moved once already.
+    """
+    system = platform.system()
+    home = Path.home()
+    if system == "Windows":
+        appdata = Path(os.environ.get("APPDATA", home / "AppData" / "Roaming"))
+        local = Path(os.environ.get("LOCALAPPDATA", home / "AppData" / "Local"))
+        # Roaming is the profile root; Local shows up on some builds and holds
+        # a Cache folder on others, so it is last and only used if it has ini.
+        return [appdata / "zen", appdata / "Zen", local / "zen"]
+    if system == "Darwin":
+        return [home / "Library" / "Application Support" / "zen"]
+    xdg = Path(os.environ.get("XDG_CONFIG_HOME", home / ".config"))
+    flatpak = home / ".var" / "app" / "app.zen_browser.zen"
+    return [
+        home / ".zen",
+        xdg / "zen",
+        flatpak / ".zen",
+        flatpak / "config" / "zen",
+    ]
+
+
+def candidate_zen_dirs() -> list[Path]:
+    """Everywhere a Zen installation lives, per platform and per packager."""
+    system = platform.system()
+    home = Path.home()
+    if system == "Windows":
+        program_files = Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
+        program_files_x86 = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"))
+        local = Path(os.environ.get("LOCALAPPDATA", home / "AppData" / "Local"))
+        return [
+            program_files / "Zen Browser",
+            program_files_x86 / "Zen Browser",
+            # The per-user installer (the default) goes to LocalAppData, not
+            # Program Files - the same trap as Store Firefox.
+            local / "Programs" / "zen",
+            local / "Programs" / "Zen Browser",
+            local / "Zen Browser",
+        ]
+    if system == "Darwin":
+        return [Path("/Applications/Zen.app/Contents/Resources")]
+    return [
+        # AUR zen-browser-bin, then distro packages, then Flatpak.
+        Path("/opt/zen-browser-bin"),
+        Path("/opt/zen-browser"),
+        Path("/opt/zen"),
+        Path("/usr/lib/zen-browser"),
+        Path("/usr/lib64/zen-browser"),
+        Path("/usr/lib/zen"),
+        Path("/var/lib/flatpak/app/app.zen_browser.zen/current/active/files"),
+        home / ".local" / "share" / "flatpak" / "app" / "app.zen_browser.zen" / "current" / "active" / "files",
+    ]
+
+
+def looks_like_zen(path: Path) -> bool:
+    """True when *path* really is a Zen installation, not just an empty folder.
+
+    Guessing wrong here means writing policies.json into somebody else's
+    directory, so the check reads the app metadata instead of trusting a name.
+    """
+    if not path.is_dir():
+        return False
+    # A Flatpak "files" root keeps the app one or two levels down.
+    for base in (path, path / "zen", path / "lib" / "zen", path / "lib" / "zen-browser"):
+        if not base.is_dir():
+            continue
+        ini = base / "application.ini"
+        if ini.is_file():
+            text = ini.read_text(encoding="utf-8", errors="replace").lower()
+            if "zen" in text:
+                return True
+        for binary in ("zen", "zen.exe", "zen-bin", "zen-browser"):
+            if (base / binary).exists():
+                return True
+    return False
+
+
 def candidate_system_firefox_dirs() -> list[Path]:
     system = platform.system()
     if system == "Windows":
@@ -139,10 +244,15 @@ def read_install_defaults(root: Path) -> list[Path]:
     return found
 
 
-def iter_profile_dirs() -> list[Path]:
+def profile_roots(browser: str = FIREFOX) -> list[Path]:
+    """The profile roots for *browser* on this platform."""
+    return candidate_zen_profile_roots() if browser == ZEN else candidate_profile_roots()
+
+
+def iter_profile_dirs(roots: list[Path] | None = None) -> list[Path]:
     """Every profile directory that exists on this machine, any install type."""
     dirs: list[Path] = []
-    for root in candidate_profile_roots():
+    for root in candidate_profile_roots() if roots is None else roots:
         ini_path = root / "profiles.ini"
         if not ini_path.exists():
             continue
@@ -162,8 +272,8 @@ def iter_profile_dirs() -> list[Path]:
     return dirs
 
 
-def detect_default_profile() -> Path | None:
-    for root in candidate_profile_roots():
+def detect_default_profile(roots: list[Path] | None = None) -> Path | None:
+    for root in candidate_profile_roots() if roots is None else roots:
         # installs.ini wins: it is the install -> profile mapping Firefox itself
         # uses, so it is the only reliable answer when several profiles exist.
         for candidate in read_install_defaults(root):
@@ -201,21 +311,22 @@ def detect_default_profile() -> Path | None:
     return None
 
 
-def all_profiles() -> list[Path]:
-    """Every Firefox profile on this machine, across every install type.
+def all_profiles(roots: list[Path] | None = None) -> list[Path]:
+    """Every profile for one browser on this machine, across every install type.
 
     Installing into all of them removes profile detection as a failure mode:
-    the CSS lands wherever Firefox actually happens to run.
+    the CSS lands wherever the browser actually happens to run.
     """
+    roots = candidate_profile_roots() if roots is None else roots
     found: list[Path] = []
-    for root in candidate_profile_roots():
+    for root in roots:
         for candidate in read_install_defaults(root):
             if candidate not in found:
                 found.append(candidate)
-    default = detect_default_profile()
+    default = detect_default_profile(roots)
     if default and default not in found:
         found.insert(0, default)
-    for candidate in iter_profile_dirs():
+    for candidate in iter_profile_dirs(roots):
         if candidate not in found:
             found.append(candidate)
     return found
@@ -226,6 +337,28 @@ def detect_system_firefox_dir() -> Path | None:
         if path.is_dir():
             return path
     return None
+
+
+def detect_zen_dir() -> Path | None:
+    """The Zen installation folder (the one policies.json must be written into)."""
+    for path in candidate_zen_dirs():
+        if looks_like_zen(path):
+            # A Flatpak "files" root holds the app one level down; policies are
+            # read relative to the real binary, so return that level.
+            for base in (path, path / "zen", path / "lib" / "zen"):
+                if (base / "application.ini").is_file() or (base / "zen").exists() or (base / "zen-bin").exists():
+                    return base
+            return path
+    return None
+
+
+def detect_install_dir(browser: str) -> Path | None:
+    return detect_zen_dir() if browser == ZEN else detect_system_firefox_dir()
+
+
+def browser_found(browser: str) -> bool:
+    """Is this browser installed *or* has it ever been run on this machine?"""
+    return bool(all_profiles(profile_roots(browser))) or detect_install_dir(browser) is not None
 
 
 def read_firefox_version(firefox_dir: Path | None) -> str:
@@ -261,31 +394,37 @@ def css_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else ""
 
 
-def doctor(profile_dir: Path | None, firefox_dir: Path | None) -> int:
+def doctor(
+    profile_dir: Path | None,
+    install_dir: Path | None,
+    browser: str = FIREFOX,
+    ui_expected: bool | None = None,
+) -> int:
     """Explain whether the floating-search UI can load, and why not."""
-    print("=== (SheepFox) Firefox doctor ===")
-    version = read_firefox_version(firefox_dir)
-    if firefox_dir:
-        print(f"  install   : {firefox_dir}")
+    label = browser_label(browser)
+    print(f"=== (SheepFox) {label} doctor ===")
+    version = read_firefox_version(install_dir)
+    if install_dir:
+        print(f"  install   : {install_dir}")
         print(f"  version   : {version}")
     else:
-        print("  install   : not detected (pass --firefox-dir)")
+        print("  install   : not detected (pass --firefox-dir / --zen-dir)")
 
     failures = 0
 
-    def report(ok: bool, label: str, detail: str = "") -> None:
+    def report(ok: bool, label_text: str, detail: str = "") -> None:
         nonlocal failures
         if not ok:
             failures += 1
         mark = "OK  " if ok else "FAIL"
-        print(f"  [{mark}] {label}{(' -> ' + detail) if detail else ''}")
+        print(f"  [{mark}] {label_text}{(' -> ' + detail) if detail else ''}")
 
     if not profile_dir:
-        print("  [FAIL] no Firefox profile found (launch Firefox once, or pass --profile)")
+        print(f"  [FAIL] no {label} profile found (launch {label} once, or pass --profile)")
         failures += 1
         return 1
 
-    print(f"  profile   : {profile_dir}   <- Firefox is launched with this one")
+    print(f"  profile   : {profile_dir}   <- {label} is launched with this one")
 
     user_js = profile_dir / "user.js"
     report(user_js.is_file(), "user.js present")
@@ -297,19 +436,27 @@ def doctor(profile_dir: Path | None, firefox_dir: Path | None) -> int:
         )
 
     chrome_dir = profile_dir / "chrome"
-    for name, minimum in (("userChrome.css", 2000), ("userContent.css", 400)):
-        target = chrome_dir / name
-        size = target.stat().st_size if target.is_file() else 0
-        report(target.is_file() and size >= minimum, f"chrome/{name}", f"{size} bytes")
+    # Zen ships its own omnibox and its own chrome, so SheepFox's pill is opt-in
+    # there: a missing stylesheet is the expected state, not a fault.
+    if ui_expected is None:
+        ui_expected = browser != ZEN or any((chrome_dir / name).is_file() for name in UI_FILES)
+    if not ui_expected:
+        print("  [info] UI theme not installed (default for Zen; add --ui to install the pill)")
+    else:
+        for name, minimum in (("userChrome.css", 2000), ("userContent.css", 400)):
+            target = chrome_dir / name
+            size = target.stat().st_size if target.is_file() else 0
+            report(target.is_file() and size >= minimum, f"chrome/{name}", f"{size} bytes")
 
-    # Is the copy in the profile the same file the repo ships? A stale copy from
-    # an older version is a classic "the CSS is there but nothing changed".
-    for name in UI_FILES:
-        src = CHROME_SRC_DIR / name
-        dst = chrome_dir / name
-        if src.is_file() and dst.is_file():
-            same = css_hash(src) == css_hash(dst)
-            report(same, f"chrome/{name} matches this repo", "stale - re-run the installer" if not same else "")
+        # Is the copy in the profile the same file the repo ships? A stale copy
+        # from an older version is a classic "the CSS is there but nothing
+        # changed".
+        for name in UI_FILES:
+            src = CHROME_SRC_DIR / name
+            dst = chrome_dir / name
+            if src.is_file() and dst.is_file():
+                same = css_hash(src) == css_hash(dst)
+                report(same, f"chrome/{name} matches this repo", "stale - re-run the installer" if not same else "")
 
     probe = chrome_dir / PROBE_FILE
     if probe.is_file():
@@ -317,41 +464,41 @@ def doctor(profile_dir: Path | None, firefox_dir: Path | None) -> int:
 
     saved = pref_value_from_prefs_js(profile_dir, "toolkit.legacyUserProfileCustomizations.stylesheets")
     if saved is None:
-        print("  [info] prefs.js has no saved value yet; Firefox will take it from user.js on next start")
+        print(f"  [info] prefs.js has no saved value yet; {label} will take it from user.js on next start")
     elif saved is True:
         report(True, "pref saved as true")
     else:
         report(False, "pref saved as false", "set it to true in about:config, or reinstall")
         print("         (a stale user.js or another hardening tool may have set it false)")
 
-    # Catch the number-one cause: SheepFox was installed into a profile that
-    # Firefox never opens (Store build, portable build, second profile, ...).
-    others = [d for d in iter_profile_dirs() if d.resolve() != profile_dir.resolve()]
+    # Catch the number-one cause: SheepFox was installed into a profile that the
+    # browser never opens (Store build, portable build, second profile, ...).
+    others = [d for d in iter_profile_dirs(profile_roots(browser)) if d.resolve() != profile_dir.resolve()]
     stray = [d for d in others if (d / "chrome" / "userChrome.css").is_file() or (d / "user.js").is_file()]
     if stray:
         print()
-        print("  [WARN] Other Firefox profiles on this machine also have SheepFox files:")
+        print(f"  [WARN] Other {label} profiles on this machine also have SheepFox files:")
         for d in stray:
             print(f"         {d}")
         print("         Only the profile above is used at launch. Install into it:")
-        print(f"           python3 scripts/install.py --profile \"{profile_dir}\"")
+        print(f'           python3 scripts/install.py --browser {browser} --profile "{profile_dir}"')
     if others and not stray:
         print()
         print(f"  [info] {len(others)} other profile(s) found, none of them modified.")
 
     # The system half (policies.json + AutoConfig) is optional: a plain
-    # per-profile install leaves a Firefox folder completely untouched, so an
-    # absent file there is not a problem - only an opportunity.
-    if firefox_dir:
+    # per-profile install leaves the installation folder completely untouched,
+    # so an absent file there is not a problem - only an opportunity.
+    if install_dir:
         system_files = ("sheepfox.cfg", "defaults/pref/local-settings.js", "distribution/policies.json")
-        installed = [rel for rel in system_files if (firefox_dir / rel).is_file()]
+        installed = [rel for rel in system_files if (install_dir / rel).is_file()]
         for rel in installed:
             report(True, f"system {rel}")
         if not installed:
             print("  [info] no system install here (--system is optional):")
             print("         policies.json preinstalls uBlock Origin + Decentraleyes and locks the shields.")
-            print("         add them with:  python3 scripts/install.py --system")
-        policy_file = firefox_dir / "distribution" / "policies.json"
+            print(f"         add them with:  python3 scripts/install.py --browser {browser} --system")
+        policy_file = install_dir / "distribution" / "policies.json"
         if policy_file.is_file():
             try:
                 policy_data = json.loads(policy_file.read_text(encoding="utf-8"))
@@ -369,19 +516,23 @@ def doctor(profile_dir: Path | None, firefox_dir: Path | None) -> int:
 
     print()
     if failures:
-        print(f"  {failures} problem(s) found. Fix the FAIL lines above, then restart Firefox.")
-        print("  Full reinstall:  python3 scripts/install.py [--profile DIR] [--system]")
+        print(f"  {failures} problem(s) found. Fix the FAIL lines above, then restart {label}.")
+        print(f"  Full reinstall:  python3 scripts/install.py --browser {browser} [--profile DIR] [--system]")
         return 1
 
-    print("  Files are in place. To prove Firefox is actually reading the stylesheet:")
-    print("    1. python3 scripts/install.py --probe")
-    print("    2. QUIT Firefox completely (Task Manager -> no firefox.exe), then start it.")
-    print("    3. Open a new tab. The toolbar turns RED and the pill gets a green outline")
-    print("       if the CSS is loaded. Nothing changes if it is not.")
-    print("    4. python3 scripts/install.py --unprobe")
-    print("  If the toolbar stays dark, the profile above is not the one Firefox runs:")
-    print("    open about:support in Firefox and compare 'Profile Folder' with the path")
-    print("    printed at the top of this report, then reinstall with --profile <that path>.")
+    if ui_expected:
+        print(f"  Files are in place. To prove {label} is actually reading the stylesheet:")
+        print("    1. python3 scripts/install.py --probe")
+        print(f"    2. QUIT {label} completely, then start it.")
+        print("    3. Open a new tab. The toolbar turns RED and the pill gets a green outline")
+        print("       if the CSS is loaded. Nothing changes if it is not.")
+        print("    4. python3 scripts/install.py --unprobe")
+        print(f"  If the toolbar stays dark, the profile above is not the one {label} runs:")
+        print(f"    open about:support in {label} and compare 'Profile Folder' with the path")
+        print("    printed at the top of this report, then reinstall with --profile <that path>.")
+    else:
+        print(f"  Files are in place. Restart {label} to apply the preferences and the policy.")
+        print("  The floating pill is Firefox-only by default; add --ui to install it here too.")
     return 0
 
 
@@ -397,8 +548,8 @@ def compose_user_js(strict: bool, low_memory: bool = False) -> str:
     return content.rstrip() + "\n"
 
 
-def render_policies(include_extensions: bool = True) -> str:
-    """The SheepShields policy, optionally without the extension entries."""
+def policy_document(include_extensions: bool = True) -> dict:
+    """The SheepShields policy as a dict, optionally without our extensions."""
     policy = json.loads(POLICIES_SRC.read_text(encoding="utf-8"))
     if not include_extensions:
         settings = policy["policies"].get("ExtensionSettings", {})
@@ -407,7 +558,45 @@ def render_policies(include_extensions: bool = True) -> str:
         managed = policy["policies"].get("3rdparty", {}).get("Extensions", {})
         for extension_id in SHEEPFOX_EXTENSIONS:
             managed.pop(extension_id, None)
-    return json.dumps(policy, indent=2, ensure_ascii=False) + "\n"
+    return policy
+
+
+def merge_policies(existing: dict | None, include_extensions: bool = True) -> dict:
+    """SheepShields on top of whatever policy file is already there.
+
+    Firefox and Zen take the *first* policy file they find, not a merge of
+    several, so writing ours must not silently delete policies the packager or
+    an administrator put there - a Zen package ships `DisableAppUpdate` and
+    dropping it would let the browser update itself behind the package manager.
+    SheepFox's own keys win; everything else is kept.
+    """
+    merged = policy_document(include_extensions)
+    ours = merged.setdefault("policies", {})
+    prior = (existing or {}).get("policies") if isinstance(existing, dict) else None
+    if isinstance(prior, dict):
+        for key, value in prior.items():
+            if key not in ours:
+                ours[key] = value
+    if not include_extensions:
+        # --no-extensions has to remove our entries even from a file that
+        # already had them, otherwise the flag would do nothing on a reinstall.
+        for extension_id in SHEEPFOX_EXTENSIONS:
+            ours.get("ExtensionSettings", {}).pop(extension_id, None)
+            ours.get("3rdparty", {}).get("Extensions", {}).pop(extension_id, None)
+    return merged
+
+
+def preserved_policy_keys(existing: dict | None) -> list[str]:
+    """Policy names the existing file has and SheepFox does not set."""
+    if not isinstance(existing, dict) or not isinstance(existing.get("policies"), dict):
+        return []
+    ours = policy_document(True)["policies"]
+    return sorted(key for key in existing["policies"] if key not in ours)
+
+
+def render_policies(include_extensions: bool = True, existing: dict | None = None) -> str:
+    """The SheepShields policy, optionally merged over *existing*."""
+    return json.dumps(merge_policies(existing, include_extensions), indent=2, ensure_ascii=False) + "\n"
 
 
 def _elevated_copy(target: Path, content: str) -> bool:
@@ -441,10 +630,35 @@ def _elevated_copy(target: Path, content: str) -> bool:
     return False
 
 
-def install_policy(firefox_dir: Path, include_extensions: bool, dry_run: bool) -> bool:
-    """Write <firefox>/distribution/policies.json, elevating only if needed."""
-    target = firefox_dir / "distribution" / "policies.json"
-    content = render_policies(include_extensions)
+def read_existing_policy(target: Path) -> dict | None:
+    if not target.is_file():
+        return None
+    try:
+        data = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def install_policy(
+    install_dir: Path,
+    include_extensions: bool,
+    dry_run: bool,
+    policy_dir: Path | None = None,
+    browser: str = FIREFOX,
+) -> bool:
+    """Write <install>/distribution/policies.json, elevating only if needed.
+
+    *policy_dir* overrides the destination folder. On Linux the one useful
+    override is `/etc/zen/policies`: Zen reads that file *instead of* the one in
+    its installation folder, and a package upgrade rewrites the latter.
+    """
+    target = (policy_dir or install_dir / "distribution") / "policies.json"
+    existing = read_existing_policy(target)
+    content = render_policies(include_extensions, existing)
+    kept = preserved_policy_keys(existing)
+    if kept:
+        print(f"  [KEEP]   Preserved {len(kept)} existing policy entr{'y' if len(kept) == 1 else 'ies'}: {', '.join(kept)}")
     if dry_run:
         print(f"  [DRY-RUN] Would write {target} ({len(content)} bytes)")
         return True
@@ -454,8 +668,8 @@ def install_policy(firefox_dir: Path, include_extensions: bool, dry_run: bool) -
         if not _elevated_copy(target, content):
             print(f"  [WARN]   Could not write {target} (administrator rights required).")
             print("           Run the installer once as an administrator:")
-            print("             sudo python3 scripts/install.py --system")
-            print(f"           or copy distribution/policies.json into {firefox_dir}")
+            print(f"             sudo python3 scripts/install.py --browser {browser} --system")
+            print(f"           or copy distribution/policies.json into {install_dir}")
             return False
         print(f"  [WRITE]  Installed {target} (as administrator)")
     if include_extensions:
@@ -480,6 +694,51 @@ def backup_and_write(dest: Path, content: str, dry_run: bool) -> None:
     print(f"  [WRITE]  Installed {dest}")
 
 
+def uninstall_policy(target: Path, dry_run: bool) -> None:
+    """Remove SheepFox's policies, keep whatever the packager put there.
+
+    Whatever we merged in on install has to come back out on --uninstall:
+    deleting the whole file would drop a Zen package's `DisableAppUpdate` and
+    let the browser update itself behind the package manager.
+    """
+    if not target.exists():
+        return
+    existing = read_existing_policy(target)
+    if existing is None:
+        if dry_run:
+            print(f"  [DRY-RUN] Would remove {target}")
+        else:
+            target.unlink()
+            print(f"  [REMOVE] Removed {target}")
+        return
+
+    policies = existing.get("policies")
+    if not isinstance(policies, dict):
+        policies = {}
+    for key in policy_document(True)["policies"]:
+        policies.pop(key, None)
+    for extension_id in SHEEPFOX_EXTENSIONS:
+        policies.get("ExtensionSettings", {}).pop(extension_id, None)
+        policies.get("3rdparty", {}).get("Extensions", {}).pop(extension_id, None)
+    remaining = {key: value for key, value in policies.items() if key not in ("ExtensionSettings", "3rdparty")}
+    extension_settings = policies.get("ExtensionSettings") or {}
+    if set(extension_settings) - {"*"}:
+        remaining["ExtensionSettings"] = extension_settings
+    if remaining:
+        content = json.dumps({"policies": remaining}, indent=2, ensure_ascii=False) + "\n"
+        if dry_run:
+            print(f"  [DRY-RUN] Would keep {len(remaining)} policy entr{'y' if len(remaining) == 1 else 'ies'} in {target}")
+        else:
+            target.write_text(content, encoding="utf-8")
+            print(f"  [KEEP]   Left {len(remaining)} non-SheepFox policy entr{'y' if len(remaining) == 1 else 'ies'} in {target}")
+        return
+    if dry_run:
+        print(f"  [DRY-RUN] Would remove {target}")
+    else:
+        target.unlink()
+        print(f"  [REMOVE] Removed {target}")
+
+
 def _uninstall_profile(profile: Path, dry_run: bool) -> None:
     for target in [profile / "user.js"] + [profile / "chrome" / name for name in (*UI_FILES, PROBE_FILE)]:
         if not target.exists():
@@ -491,10 +750,241 @@ def _uninstall_profile(profile: Path, dry_run: bool) -> None:
             print(f"  [REMOVE] Removed {target}")
 
 
+def ui_enabled(browser: str, args: argparse.Namespace) -> bool:
+    """Is the SheepFox pill part of this install?
+
+    Firefox: yes, that is the whole point of the theme. Zen: only with --ui -
+    Zen already ships its own floating omnibox, so our pill is a choice there,
+    not a default.
+    """
+    if args.no_ui:
+        return False
+    if args.ui:
+        return True
+    return browser == FIREFOX
+
+
+def parse_browsers(args: argparse.Namespace) -> list[str]:
+    """Which browsers this run should touch, in a stable order."""
+    if args.zen:
+        chosen = ZEN
+    else:
+        chosen = args.browser
+    if chosen == FIREFOX:
+        return [FIREFOX]
+    if chosen == ZEN:
+        return [ZEN]
+    if chosen == "both":
+        return [FIREFOX, ZEN]
+
+    # auto: everything that is actually installed or has ever been run. With
+    # nothing detectable, fall back to Firefox so the error messages stay the
+    # ones people already know.
+    # An explicit --firefox-dir / --zen-dir only pins that browser's install
+    # location; it does not mean "skip the other browser".
+    if args.profile:
+        lowered = str(args.profile).lower()
+        if "zen" in lowered:
+            return [ZEN]
+        if "firefox" in lowered or ".mozilla" in lowered:
+            return [FIREFOX]
+    found = [browser for browser in BROWSERS if browser_found(browser)]
+    return found or [FIREFOX]
+
+
+def install_into_browser(browser: str, args: argparse.Namespace) -> int:
+    """One browser's worth of work: profiles, UI, policy, doctor, uninstall."""
+    label = browser_label(browser)
+    explicit_dir = args.zen_dir if browser == ZEN else args.firefox_dir
+    install_dir = explicit_dir.resolve() if explicit_dir else detect_install_dir(browser)
+    roots = profile_roots(browser)
+    profiles = [args.profile.resolve()] if args.profile else all_profiles(roots)
+    profile_dir = profiles[0] if profiles else None
+    ui = ui_enabled(browser, args)
+    # Doctor and report describe the disk, not the flags: only override what
+    # they should expect when the user said so explicitly.
+    ui_expectation = ui if (args.ui or args.no_ui) else None
+
+    if args.profile and not profile_dir.is_dir():
+        print(f"[ERROR] Profile directory does not exist: {profile_dir}", file=sys.stderr)
+        return 1
+    if explicit_dir and install_dir and not install_dir.is_dir():
+        print(f"[ERROR] {label} directory does not exist: {install_dir}", file=sys.stderr)
+        return 1
+
+    print(f"=== (SheepFox) {label} Installer ===")
+    if len(profiles) > 1:
+        print(f"Detected Profiles: {len(profiles)} (installing into all of them)")
+        for target in profiles:
+            print(f"                 - {target}")
+    else:
+        print(f"Detected Profile : {profile_dir if profile_dir else 'Not found (pass --profile <dir>)'}")
+    dir_hint = "--zen-dir <dir>" if browser == ZEN else "--firefox-dir <dir>"
+    print(f"Detected System  : {install_dir if install_dir else 'Not found (pass ' + dir_hint + ')'}")
+    if browser == ZEN and not (args.doctor or args.report or args.uninstall or args.probe or args.unprobe):
+        print(f"UI theme         : {'installed' if ui else 'not installed (Zen keeps its own omnibox; add --ui)'}")
+
+    if args.report is not None:
+        import contextlib
+        import io as _io
+
+        buffer = _io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            print(f"=== (SheepFox) {label} report ===")
+            print(f"platform     : {platform.platform()}")
+            print(f"browser      : {label}")
+            print(f"repo         : {REPO_ROOT}")
+            print(f"install dir  : {install_dir}")
+            print(f"version      : {read_firefox_version(install_dir)}")
+            print("profiles found:")
+            for candidate in all_profiles(roots):
+                print(f"  - {candidate}")
+            print()
+            code = doctor(profile_dir, install_dir, browser=browser, ui_expected=ui_expectation)
+        text = buffer.getvalue()
+        destination = args.report if args.report.is_absolute() else Path.cwd() / args.report
+        destination.write_text(text + f"\nexit_code={code}\n", encoding="utf-8")
+        print(text)
+        print(f"[REPORT] Written to {destination}")
+        print("         Paste that file (or its contents) into the issue/chat.")
+        return code
+
+    if args.doctor:
+        return doctor(profile_dir, install_dir, browser=browser, ui_expected=ui_expectation)
+
+    if args.probe or args.unprobe:
+        targets = [t for t in profiles if t.is_dir()]
+        if not targets:
+            print("[ERROR] No profile to write the probe into. Pass --profile <dir>.", file=sys.stderr)
+            return 1
+        for target in targets:
+            probe_path = target / "chrome" / PROBE_FILE
+            if args.unprobe:
+                if probe_path.exists():
+                    if args.dry_run:
+                        print(f"  [DRY-RUN] Would remove {probe_path}")
+                    else:
+                        probe_path.unlink()
+                        print(f"  [REMOVE] Removed {probe_path}")
+                else:
+                    print(f"  [INFO]   No probe file present in {target}")
+                continue
+            backup_and_write(probe_path, PROBE_CSS, dry_run=args.dry_run)
+        if args.unprobe:
+            return 0
+        if not args.dry_run:
+            print(f"\n  Now QUIT {label} completely, start it and open a new tab:")
+            print("  a RED toolbar + green pill outline means the CSS is loading.")
+            print("  Remove it with:  python3 scripts/install.py --unprobe")
+        return 0
+
+    if args.uninstall:
+        for target_profile in [t for t in profiles if t.is_dir()]:
+            _uninstall_profile(target_profile, args.dry_run)
+        # Mirrors the install rule: a plain run wrote the policy, so a plain
+        # --uninstall has to remove it again.
+        if (args.system or not args.profile) and install_dir:
+            for rel in ["sheepfox.cfg", "defaults/pref/local-settings.js"]:
+                target = install_dir / rel
+                if target.exists():
+                    if args.dry_run:
+                        print(f"  [DRY-RUN] Would remove {target}")
+                    else:
+                        target.unlink()
+                        print(f"  [REMOVE] Removed {target}")
+            uninstall_policy(install_dir / "distribution" / "policies.json", args.dry_run)
+            if args.policy_dir:
+                uninstall_policy(args.policy_dir / "policies.json", args.dry_run)
+        return 0
+
+    if profile_dir and not profile_dir.is_dir() and not args.dry_run:
+        print(f"[ERROR] Profile directory does not exist: {profile_dir}", file=sys.stderr)
+        return 1
+
+    if not profile_dir and not args.system:
+        if args.dry_run:
+            print(f"[INFO] Dry-run completed (no {label} profile currently exists on this machine).")
+            return 0
+        print(
+            f"[ERROR] Could not auto-detect a {label} profile. Launch {label} once or pass --profile <path>.",
+            file=sys.stderr,
+        )
+        return 1
+
+    payload = compose_user_js(strict=args.strict, low_memory=args.low_memory)
+    for target in [t for t in profiles if t.is_dir()]:
+        if len(profiles) > 1:
+            print(f"\n  -> {target}")
+        backup_and_write(target / "user.js", payload, dry_run=args.dry_run)
+
+        if not ui:
+            if browser == ZEN and not args.no_ui:
+                print("  [SKIP]   UI theme not installed (Zen's own omnibox is used; add --ui for SheepFox's pill)")
+            else:
+                print("  [SKIP]   UI theme skipped (--no-ui)")
+            continue
+        for name in UI_FILES:
+            src = CHROME_SRC_DIR / name
+            if not src.is_file():
+                print(f"  [WARN]   Missing UI asset: {src}")
+                continue
+            backup_and_write(target / "chrome" / name, src.read_text(encoding="utf-8"), args.dry_run)
+
+    if args.system:
+        if not install_dir:
+            print(f"[ERROR] Could not locate the {label} installation directory. Pass --firefox-dir/--zen-dir <path>.", file=sys.stderr)
+            return 1
+        backup_and_write(install_dir / "sheepfox.cfg", AUTOCONFIG_CFG_SRC.read_text(encoding="utf-8"), args.dry_run)
+        backup_and_write(
+            install_dir / "defaults" / "pref" / "local-settings.js",
+            LOCAL_SETTINGS_SRC.read_text(encoding="utf-8"),
+            args.dry_run,
+        )
+
+    # The SheepShields policy is what preinstalls uBlock Origin + Decentraleyes,
+    # so it is part of a normal install - not something to discover later. A
+    # --profile run means "this profile only" and stays off the system tree.
+    if args.system or not args.profile:
+        if install_dir:
+            install_policy(
+                install_dir,
+                include_extensions=args.extensions,
+                dry_run=args.dry_run,
+                policy_dir=args.policy_dir,
+                browser=browser,
+            )
+        else:
+            print(f"  [info]   {label} installation directory not found; extension preinstall skipped.")
+            print("           uBlock Origin + Decentraleyes arrive on the next start once it is installed.")
+
+    print(f"\n[DONE] Restart {label} to activate (SheepFox) speed & privacy protections!")
+    return 0
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Install (SheepFox) Firefox speed & privacy suite.")
-    parser.add_argument("--profile", type=Path, help="Explicit path to target Firefox profile directory.")
-    parser.add_argument("--firefox-dir", type=Path, help="Explicit path to Firefox binary installation folder.")
+    parser = argparse.ArgumentParser(
+        description="Install the (SheepFox) speed & privacy suite into Firefox and/or Zen Browser."
+    )
+    parser.add_argument("--profile", type=Path, help="Explicit path to the target profile directory.")
+    parser.add_argument("--firefox-dir", type=Path, help="Explicit path to the Firefox installation folder.")
+    parser.add_argument("--zen-dir", type=Path, help="Explicit path to the Zen Browser installation folder.")
+    parser.add_argument(
+        "--browser",
+        choices=("auto", "firefox", "zen", "both"),
+        default="auto",
+        help="Which browser to configure (default: auto - every one that is installed or has been run).",
+    )
+    parser.add_argument(
+        "--zen",
+        action="store_true",
+        help="Shorthand for --browser zen.",
+    )
+    parser.add_argument(
+        "--policy-dir",
+        type=Path,
+        help="Write policies.json into this folder instead of <install>/distribution "
+        "(Linux Zen reads /etc/zen/policies first, and package upgrades leave it alone).",
+    )
     parser.add_argument(
         "--system",
         action="store_true",
@@ -541,152 +1031,25 @@ def main() -> int:
         action="store_true",
         help="Skip the chrome/userChrome.css + userContent.css floating-search theme.",
     )
+    parser.add_argument(
+        "--ui",
+        action="store_true",
+        help="Install the floating-search theme even where it is opt-in (Zen Browser).",
+    )
     args = parser.parse_args()
 
-    profile_dir = args.profile.resolve() if args.profile else detect_default_profile()
-    firefox_dir = args.firefox_dir.resolve() if args.firefox_dir else detect_system_firefox_dir()
-    # With no explicit --profile, install into EVERY profile that exists. Profile
-    # detection is the number-one reason a userChrome theme silently does
-    # nothing (Store builds, portable builds, a second profile).
-    targets = [profile_dir] if args.profile else all_profiles()
-    if targets and profile_dir is None:
-        profile_dir = targets[0]
+    browsers = parse_browsers(args)
+    if len(browsers) > 1 and args.profile:
+        # A named profile belongs to exactly one browser.
+        browsers = [FIREFOX]
 
-    if args.profile and not profile_dir.is_dir():
-        print(f"[ERROR] Profile directory does not exist: {profile_dir}", file=sys.stderr)
-        return 1
-    if args.firefox_dir and not firefox_dir.is_dir():
-        print(f"[ERROR] Firefox directory does not exist: {firefox_dir}", file=sys.stderr)
-        return 1
-
-    print("=== (SheepFox) Firefox Installer ===")
-    if len(targets) > 1:
-        print(f"Detected Profiles: {len(targets)} (installing into all of them)")
-        for target in targets:
-            print(f"                 - {target}")
-    else:
-        print(f"Detected Profile : {profile_dir if profile_dir else 'Not found (pass --profile <dir>)'}")
-    print(f"Detected System  : {firefox_dir if firefox_dir else 'Not found (pass --firefox-dir <dir>)'}")
-
-    if args.report is not None:
-        import contextlib
-        import io as _io
-
-        buffer = _io.StringIO()
-        with contextlib.redirect_stdout(buffer):
-            print("=== (SheepFox) Firefox report ===")
-            print(f"platform     : {platform.platform()}")
-            print(f"repo         : {REPO_ROOT}")
-            print(f"firefox dir  : {firefox_dir}")
-            print(f"firefox ver  : {read_firefox_version(firefox_dir)}")
-            print("profiles found:")
-            for candidate in all_profiles():
-                print(f"  - {candidate}")
+    status = 0
+    for browser in browsers:
+        if len(browsers) > 1:
             print()
-            code = doctor(profile_dir, firefox_dir)
-        text = buffer.getvalue()
-        destination = args.report if args.report.is_absolute() else Path.cwd() / args.report
-        destination.write_text(text + f"\nexit_code={code}\n", encoding="utf-8")
-        print(text)
-        print(f"[REPORT] Written to {destination}")
-        print("         Paste that file (or its contents) into the issue/chat.")
-        return code
-
-    if args.doctor:
-        return doctor(profile_dir, firefox_dir)
-
-    if args.probe or args.unprobe:
-        targets = [t for t in targets if t.is_dir()]
-        if not targets:
-            print("[ERROR] No profile to write the probe into. Pass --profile <dir>.", file=sys.stderr)
-            return 1
-        for target in targets:
-            probe_path = target / "chrome" / PROBE_FILE
-            if args.unprobe:
-                if probe_path.exists():
-                    if args.dry_run:
-                        print(f"  [DRY-RUN] Would remove {probe_path}")
-                    else:
-                        probe_path.unlink()
-                        print(f"  [REMOVE] Removed {probe_path}")
-                else:
-                    print(f"  [INFO]   No probe file present in {target}")
-                continue
-            backup_and_write(probe_path, PROBE_CSS, dry_run=args.dry_run)
-        if args.unprobe:
-            return 0
-        if not args.dry_run:
-            print("\n  Now QUIT Firefox completely (Task Manager -> no firefox.exe), start it and")
-            print("  open a new tab: a RED toolbar + green pill outline means the CSS is loading.")
-            print("  Remove it with:  python3 scripts/install.py --unprobe")
-        return 0
-
-    if args.uninstall:
-        for target_profile in [t for t in targets if t.is_dir()]:
-            _uninstall_profile(target_profile, args.dry_run)
-        # Mirrors the install rule: a plain run wrote the policy, so a plain
-        # --uninstall has to remove it again.
-        if (args.system or not args.profile) and firefox_dir:
-            for rel in ["sheepfox.cfg", "defaults/pref/local-settings.js", "distribution/policies.json"]:
-                target = firefox_dir / rel
-                if target.exists():
-                    if args.dry_run:
-                        print(f"  [DRY-RUN] Would remove {target}")
-                    else:
-                        target.unlink()
-                        print(f"  [REMOVE] Removed {target}")
-        return 0
-
-    if profile_dir and not profile_dir.is_dir() and not args.dry_run:
-        print(f"[ERROR] Profile directory does not exist: {profile_dir}", file=sys.stderr)
-        return 1
-
-    if not profile_dir and not args.system:
-        if args.dry_run:
-            print("[INFO] Dry-run completed (no Firefox profile currently exists on this machine).")
-            return 0
-        print("[ERROR] Could not auto-detect a Firefox profile. Launch Firefox once or pass --profile <path>.", file=sys.stderr)
-        return 1
-
-    payload = compose_user_js(strict=args.strict, low_memory=args.low_memory)
-    for target in [t for t in targets if t.is_dir()]:
-        if len(targets) > 1:
-            print(f"\n  -> {target}")
-        backup_and_write(target / "user.js", payload, dry_run=args.dry_run)
-
-        if args.no_ui:
-            print("  [SKIP]   UI theme skipped (--no-ui)")
-            continue
-        for name in UI_FILES:
-            src = CHROME_SRC_DIR / name
-            if not src.is_file():
-                print(f"  [WARN]   Missing UI asset: {src}")
-                continue
-            backup_and_write(target / "chrome" / name, src.read_text(encoding="utf-8"), args.dry_run)
-
-    if args.system:
-        if not firefox_dir:
-            print("[ERROR] Could not locate Firefox installation directory. Pass --firefox-dir <path>.", file=sys.stderr)
-            return 1
-        backup_and_write(firefox_dir / "sheepfox.cfg", AUTOCONFIG_CFG_SRC.read_text(encoding="utf-8"), args.dry_run)
-        backup_and_write(
-            firefox_dir / "defaults" / "pref" / "local-settings.js",
-            LOCAL_SETTINGS_SRC.read_text(encoding="utf-8"),
-            args.dry_run,
-        )
-
-    # The SheepShields policy is what preinstalls uBlock Origin + Decentraleyes,
-    # so it is part of a normal install - not something to discover later. A
-    # --profile run means "this profile only" and stays off the system tree.
-    if args.system or not args.profile:
-        if firefox_dir:
-            install_policy(firefox_dir, include_extensions=args.extensions, dry_run=args.dry_run)
-        else:
-            print("  [info]   Firefox installation directory not found; extension preinstall skipped.")
-            print("           uBlock Origin + Decentraleyes arrive on the next start once Firefox is installed.")
-
-    print("\n[DONE] Restart Firefox to activate (SheepFox) speed & privacy protections!")
-    return 0
+        code = install_into_browser(browser, args)
+        status = status or code
+    return status
 
 
 if __name__ == "__main__":

@@ -5,8 +5,14 @@ The source of the two artifacts published on every `v*` tag:
 | Artifact | Built from | Runs |
 | --- | --- | --- |
 | `dist/SheepFox-Setup-<version>.exe` | `installer/windows/launcher.c` | `scripts\install-windows.ps1` |
-| `dist/SheepFox-<version>.dmg` | `installer/macos/Install SheepFox.command` | `scripts/install-unix.sh` |
+| `dist/SheepFox-Zen-Setup-<version>.exe` | the same `launcher.c`, compiled with `-Zen` baked in | `scripts\install-windows.ps1 -Zen` |
+| `dist/SheepFox-<version>.dmg` | `installer/macos/Install SheepFox.command` + `Install SheepFox for Zen.command` | `scripts/install-unix.sh` / `scripts/install-zen.sh` |
 | `dist/SheepFox-<version>.iso` | the same volume as the `.dmg` | — (fallback) |
+
+The Zen setup is not a second payload: it is the same launcher compiled with
+`-DSHEEPFOX_DEFAULT_ARGS_=" -Zen"` and a Zen banner, so one build system and one
+set of scripts covers both browsers. `SheepFox-Setup.exe -Zen` does the same
+thing from the Firefox-branded binary.
 
 Nothing is re-implemented inside an installer. Both launchers unpack the payload
 (a copy of `scripts/`, `config/` and `LICENSE`/`README.md`) and then run the same

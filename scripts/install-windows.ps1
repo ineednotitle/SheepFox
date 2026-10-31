@@ -44,6 +44,15 @@
   Skip the chrome\userChrome.css + userContent.css floating-search theme, so
   Firefox keeps its stock toolbar and New Tab layout.
 
+.PARAMETER Zen
+  Configure Zen Browser instead of Firefox: its profile folder (the same
+  per-profile user.js), its installation folder, and its own defaults. Zen
+  already ships a floating omnibox, so the SheepFox pill is not installed
+  unless -UI is given.
+
+.PARAMETER UI
+  Install the floating-search theme into Zen as well (opt-in there).
+
 .PARAMETER DryRun
   Print every action without touching the disk.
 
@@ -87,6 +96,8 @@ param(
     [switch]$LowMemory,
     [switch]$Probe,
     [switch]$Unprobe,
+    [switch]$Zen,
+    [switch]$UI,
     [switch]$Report,
     [string]$ProfilePath = "",
     [string]$FirefoxDir = "",
@@ -119,6 +130,17 @@ if ($RemainingArguments -and $RemainingArguments.Count -gt 0) {
 if (-not ($ProfileOnly -or $Doctor -or $DryRun -or $Probe -or $Unprobe -or $Report)) {
     $System = $true
 }
+
+# Firefox and Zen Browser are the same engine with different folders: this is
+# the only place the difference lives.
+$Brand = if ($Zen) { "Zen Browser" } else { "Firefox" }
+$ProcessName = if ($Zen) { "zen.exe" } else { "firefox.exe" }
+$ProfileRootName = if ($Zen) { "zen" } else { "Mozilla\Firefox" }
+$InstallHint = if ($Zen) { "$env:LOCALAPPDATA\Programs\zen" } else { "C:\Program Files\Mozilla Firefox" }
+
+# Zen has its own floating omnibox and its own chrome, so SheepFox's pill is a
+# choice there, not a default. -UI asks for it explicitly.
+if ($Zen -and -not $UI) { $NoUI = $true }
 
 # --------------------------------------------------------------------------
 # Helpers
@@ -163,6 +185,28 @@ function Backup-ExistingFile {
     $backup = "$Path.sheepfox-backup-$stamp"
     Copy-Item -Path $Path -Destination $backup -Force
     Write-SheepFox "  [backup] $backup" "DarkYellow"
+}
+
+function Merge-PolicyDocument {
+    <#
+      SheepFox's own policy entries win; anything already in the file is kept.
+      Both browsers take the first policy file they find instead of merging
+      several, so overwriting must not drop policies the packager set - a
+      packaged Zen ships DisableAppUpdate, and losing it would let the browser
+      update itself behind the package manager.
+    #>
+    param([string]$ExistingText, [string]$OurText)
+    if (-not $ExistingText) { return $OurText }
+    try { $existing = $ExistingText | ConvertFrom-Json } catch { return $OurText }
+    if (-not $existing -or -not $existing.policies) { return $OurText }
+    $merged = $OurText | ConvertFrom-Json
+    $known = @($merged.policies.PSObject.Properties | ForEach-Object { $_.Name })
+    foreach ($property in @($existing.policies.PSObject.Properties)) {
+        if ($known -contains $property.Name) { continue }
+        $merged.policies | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value
+        Write-SheepFox "  [keep] preserved existing policy: $($property.Name)" "DarkYellow"
+    }
+    return ($merged | ConvertTo-Json -Depth 64)
 }
 
 function Read-ProfileIni {
@@ -237,12 +281,28 @@ function Resolve-FirefoxDir {
     if ($Explicit -and (Test-Path $Explicit)) { return (Resolve-Path $Explicit).Path }
 
     $candidates = @()
-    if ($env:ProgramFiles) { $candidates += (Join-Path $env:ProgramFiles "Mozilla Firefox") }
-    if (${env:ProgramFiles(x86)}) { $candidates += (Join-Path ${env:ProgramFiles(x86)} "Mozilla Firefox") }
+    if ($Zen) {
+        # Zen's per-user installer (the default) goes to LOCALAPPDATA, not
+        # Program Files - the same trap as Microsoft Store Firefox.
+        if ($env:ProgramFiles) { $candidates += (Join-Path $env:ProgramFiles "Zen Browser") }
+        if (${env:ProgramFiles(x86)}) { $candidates += (Join-Path ${env:ProgramFiles(x86)} "Zen Browser") }
+        if ($env:LOCALAPPDATA) {
+            $candidates += (Join-Path $env:LOCALAPPDATA "Programs\zen")
+            $candidates += (Join-Path $env:LOCALAPPDATA "Programs\Zen Browser")
+            $candidates += (Join-Path $env:LOCALAPPDATA "Zen Browser")
+        }
+    }
+    if (-not $Zen -and $env:ProgramFiles) { $candidates += (Join-Path $env:ProgramFiles "Mozilla Firefox") }
+    if (-not $Zen -and ${env:ProgramFiles(x86)}) { $candidates += (Join-Path ${env:ProgramFiles(x86)} "Mozilla Firefox") }
 
-    foreach ($key in @(
-            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\firefox.exe",
-            "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\firefox.exe")) {
+    $appPathKeys = if ($Zen) {
+        @("HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\zen.exe",
+          "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\zen.exe")
+    } else {
+        @("HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\firefox.exe",
+          "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\firefox.exe")
+    }
+    foreach ($key in $appPathKeys) {
         try {
             $item = Get-ItemProperty -Path $key -ErrorAction Stop
             if ($item."(default)") { $candidates += (Split-Path -Parent $item."(default)") }
@@ -261,14 +321,18 @@ function Get-SheepFoxProfiles {
     # detection as a failure mode.
     $results = @()
     $roots = @()
-    if ($env:APPDATA) { $roots += (Join-Path $env:APPDATA "Mozilla\Firefox") }
-    if ($env:LOCALAPPDATA) {
+    if ($env:APPDATA) { $roots += (Join-Path $env:APPDATA $ProfileRootName) }
+    if (-not $Zen -and $env:LOCALAPPDATA) {
         $packages = Join-Path $env:LOCALAPPDATA "Packages"
         if (Test-Path $packages) {
             foreach ($dir in (Get-ChildItem -Path $packages -Directory -Filter "Mozilla.Firefox_*" -ErrorAction SilentlyContinue)) {
                 $roots += (Join-Path $dir.FullName "LocalCache\Roaming\Mozilla\Firefox")
             }
         }
+    }
+    if ($Zen -and $env:LOCALAPPDATA) {
+        # Some Zen builds keep profiles next to the binary instead of in Roaming.
+        $roots += (Join-Path $env:LOCALAPPDATA "zen")
     }
     foreach ($root in $roots) {
         # installs.ini first: it records which profile each install opens.
@@ -347,7 +411,7 @@ if (-not (Test-Path $UserJsSrc)) {
     exit 1
 }
 
-Write-SheepFox "=== (SheepFox) Firefox Windows Installer ===" "Cyan"
+Write-SheepFox ("=== (SheepFox) " + $Brand + " Windows Installer ===") "Cyan"
 
 $Profiles = @()
 if ($ProfilePath) {
@@ -369,7 +433,7 @@ Write-Host ""
 # --------------------------------------------------------------------------
 if ($Probe -or $Unprobe) {
     if (-not $ProfilePath -or -not (Test-Path $ProfilePath)) {
-        Write-SheepFox "[error] No Firefox profile to write into. Pass -ProfilePath <dir>." "Red"
+        Write-SheepFox "[error] No $Brand profile to write into. Pass -ProfilePath <dir>." "Red"
         exit 1
     }
     $probePath = Join-Path $ProfilePath "chrome\$ProbeFile"
@@ -388,7 +452,7 @@ if ($Probe -or $Unprobe) {
     }
     $probeCss = @"
 /* (SheepFox) CSS load probe - written by -Probe, removed by -Unprobe.
-   A RED toolbar means Firefox is reading userChrome.css from this profile. */
+   A RED toolbar means $Brand is reading userChrome.css from this profile. */
 #nav-bar {
   background: #cc0000 !important;
 }
@@ -420,7 +484,7 @@ if ($Doctor) {
         $reportPath = Join-Path (Get-Location) "sheepfox-report.txt"
         try { Start-Transcript -Path $reportPath -Force | Out-Null } catch { Write-SheepFox "[warn] could not start transcript: $_" "Yellow" }
     }
-    Write-SheepFox "=== (SheepFox) Firefox doctor ===" "Cyan"
+    Write-SheepFox ("=== (SheepFox) " + $Brand + " doctor ===") "Cyan"
     Write-SheepFox ("  profiles : " + $(if ($Profiles.Count -gt 0) { $Profiles -join "; " } else { "none found" }))
     $problems = 0
 
@@ -443,7 +507,7 @@ if ($Doctor) {
     Write-SheepFox ("  profile   : " + $(if ($ProfilePath) { $ProfilePath } else { "not detected (pass -ProfilePath)" }))
 
     if (-not $ProfilePath -or -not (Test-Path $ProfilePath)) {
-        Write-SheepFox "  [FAIL] no Firefox profile found. Launch Firefox once, or pass -ProfilePath." "Red"
+        Write-SheepFox "  [FAIL] no $Brand profile found. Launch $Brand once, or pass -ProfilePath." "Red"
         if ($Report) { Stop-Transcript | Out-Null; Write-SheepFox "  report: $reportPath" "Cyan" }
         exit 1
     }
@@ -456,20 +520,28 @@ if ($Doctor) {
             "user.js enables userChrome.css"
     }
 
-    foreach ($pair in @(
-            @{ Name = "userChrome.css"; Min = 2000 },
-            @{ Name = "userContent.css"; Min = 400 })) {
-        $target = Join-Path $ProfilePath "chrome\$($pair.Name)"
-        $size = if (Test-Path $target) { (Get-Item $target).Length } else { 0 }
-        Report-Check (($size -ge $pair.Min)) "chrome\$($pair.Name)" "$size bytes"
-    }
+    # A missing stylesheet is the expected state in Zen (unless it was
+    # installed): report it as information, never as a failure.
+    $uiExpected = -not $NoUI
+    if (-not $uiExpected -and (Test-Path (Join-Path $ProfilePath "chrome\userChrome.css"))) { $uiExpected = $true }
+    if (-not $uiExpected) {
+        Write-SheepFox "  [info] UI theme not installed (default for Zen; add -UI to install the pill)" "Gray"
+    } else {
+        foreach ($pair in @(
+                @{ Name = "userChrome.css"; Min = 2000 },
+                @{ Name = "userContent.css"; Min = 400 })) {
+            $target = Join-Path $ProfilePath "chrome\$($pair.Name)"
+            $size = if (Test-Path $target) { (Get-Item $target).Length } else { 0 }
+            Report-Check (($size -ge $pair.Min)) "chrome\$($pair.Name)" "$size bytes"
+        }
 
-    foreach ($name in $UiFiles) {
-        $src = Join-Path $ChromeSrcDir $name
-        $dst = Join-Path $ProfilePath "chrome\$name"
-        if ((Test-Path $src) -and (Test-Path $dst)) {
-            $same = (Get-FileHash $src -Algorithm SHA256).Hash -eq (Get-FileHash $dst -Algorithm SHA256).Hash
-            Report-Check $same "chrome\$name matches this repo" $(if ($same) { "" } else { "stale - re-run the installer" })
+        foreach ($name in $UiFiles) {
+            $src = Join-Path $ChromeSrcDir $name
+            $dst = Join-Path $ProfilePath "chrome\$name"
+            if ((Test-Path $src) -and (Test-Path $dst)) {
+                $same = (Get-FileHash $src -Algorithm SHA256).Hash -eq (Get-FileHash $dst -Algorithm SHA256).Hash
+                Report-Check $same "chrome\$name matches this repo" $(if ($same) { "" } else { "stale - re-run the installer" })
+            }
         }
     }
 
@@ -479,7 +551,7 @@ if ($Doctor) {
 
     # Catch the number-one cause: installed into a profile Firefox never opens.
     if ($env:APPDATA) {
-        $ini = Join-Path $env:APPDATA "Mozilla\Firefox\profiles.ini"
+        $ini = Join-Path (Join-Path $env:APPDATA $ProfileRootName) "profiles.ini"
         if (Test-Path $ini) {
             $root = Split-Path -Parent $ini
             foreach ($section in (Read-ProfileIni -IniPath $ini)) {
@@ -494,7 +566,7 @@ if ($Doctor) {
                 if ($full -eq (Resolve-Path $ProfilePath).Path) { continue }
                 if ((Test-Path (Join-Path $full "user.js")) -or (Test-Path (Join-Path $full "chrome\userChrome.css"))) {
                     Write-SheepFox "  [warn] SheepFox files also exist in another profile: $full" "Yellow"
-                    Write-SheepFox "         Firefox launches the profile shown at the top of this report." "Yellow"
+                    Write-SheepFox "         $Brand launches the profile shown at the top of this report." "Yellow"
                 }
             }
         }
@@ -549,18 +621,18 @@ if ($Doctor) {
 
     Write-Host ""
     if ($problems -gt 0) {
-        Write-SheepFox "  $problems problem(s) found. Fix the FAIL lines above, then restart Firefox." "Yellow"
+        Write-SheepFox "  $problems problem(s) found. Fix the FAIL lines above, then restart $Brand." "Yellow"
         Write-SheepFox "  Full reinstall:  .\scripts\install-windows.bat -System" "Yellow"
         if ($Report) { Stop-Transcript | Out-Null; Write-SheepFox "  report: $reportPath" "Cyan" }
         exit 1
     }
 
-    Write-SheepFox "  Files are in place. To prove Firefox is actually reading the stylesheet:" "Cyan"
+    Write-SheepFox "  Files are in place. To prove $Brand is actually reading the stylesheet:" "Cyan"
     Write-SheepFox "    1. .\scripts\install-windows.bat -Probe"
-    Write-SheepFox "    2. QUIT Firefox completely (Task Manager: no firefox.exe), then start it."
+    Write-SheepFox "    2. QUIT $Brand completely (Task Manager: no $ProcessName), then start it."
     Write-SheepFox "    3. Open a new tab: RED toolbar = CSS is loading. Nothing = it is not."
     Write-SheepFox "    4. .\scripts\install-windows.bat -Unprobe"
-    Write-SheepFox "  If the toolbar stays dark, open about:support in Firefox, compare its"
+    Write-SheepFox "  If the toolbar stays dark, open about:support in $Brand, compare its"
     Write-SheepFox "  'Profile Folder' with the path above, then:"
     Write-SheepFox '    .\scripts\install-windows.bat -ProfilePath "<that path>"'
     exit 0
@@ -631,7 +703,11 @@ if ($Profiles.Count -gt 0) {
         }
 
         if ($NoUI) {
-            Write-SheepFox "  [skip] UI theme skipped (-NoUI)" "DarkYellow"
+            if ($Zen -and -not $UI) {
+                Write-SheepFox "  [skip] UI theme not installed (Zen keeps its own omnibox; add -UI for SheepFox's pill)" "DarkYellow"
+            } else {
+                Write-SheepFox "  [skip] UI theme skipped (-NoUI)" "DarkYellow"
+            }
             continue
         }
         foreach ($name in $UiFiles) {
@@ -651,7 +727,7 @@ if ($Profiles.Count -gt 0) {
         }
     }
 } elseif (-not $System) {
-    Write-SheepFox "[warn] No Firefox profile found. Launch Firefox once, or pass -ProfilePath." "Yellow"
+    Write-SheepFox "[warn] No $Brand profile found. Launch $Brand once, or pass -ProfilePath." "Yellow"
 }
 
 # --------------------------------------------------------------------------
@@ -659,7 +735,7 @@ if ($Profiles.Count -gt 0) {
 # --------------------------------------------------------------------------
 if ($System) {
     if (-not $FirefoxDir -or -not (Test-Path $FirefoxDir)) {
-        Write-SheepFox "[error] Firefox installation directory not found. Pass -FirefoxDir 'C:\Program Files\Mozilla Firefox'." "Red"
+        Write-SheepFox "[error] $Brand installation directory not found. Pass -FirefoxDir '$InstallHint'." "Red"
         exit 1
     }
 
@@ -678,6 +754,10 @@ if ($System) {
         }
         $policiesText = $policiesObject | ConvertTo-Json -Depth 32
     }
+
+    $existingPolicyText = ""
+    if (Test-Path $policiesTarget) { $existingPolicyText = [System.IO.File]::ReadAllText($policiesTarget) }
+    $policiesText = Merge-PolicyDocument -ExistingText $existingPolicyText -OurText $policiesText
 
     if ($DryRun) {
         Write-SheepFox "  [dry-run] would write $cfgTarget"
@@ -700,5 +780,5 @@ if ($System) {
     }
 }
 
-Write-SheepFox "`nDone. Restart Firefox to activate SheepFox speed + privacy." "Cyan"
+Write-SheepFox "`nDone. Restart $Brand to activate SheepFox speed + privacy." "Cyan"
 exit 0
