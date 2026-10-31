@@ -337,6 +337,10 @@ class TestFloatingSearchUI(unittest.TestCase):
         self.assertIn("right: 0 !important", shell)
         self.assertIn("margin-inline: auto", shell)
         self.assertNotIn("translate: -50%", shell, msg="translate centring drifts off-centre")
+        # A `margin` shorthand after margin-inline:auto resets it to 0 and the
+        # pill silently loses its centring.
+        self.assertNotIn("margin: 0", shell, msg="margin shorthand would un-centre the pill")
+        self.assertIn("margin-block: 0", shell)
         self.assertIn("outline: none", shell, msg="the pill replaces Firefox's focus ring")
         self.assertIn("visibility: visible", shell)
         self.assertIn("opacity: 1", shell)

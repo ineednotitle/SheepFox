@@ -123,7 +123,9 @@
   width: var(--sheepfox-pill-width) !important;
   min-width: var(--sheepfox-pill-width) !important;
   max-width: var(--sheepfox-pill-width) !important;
-  margin: 0 !important;
+  /* margin-block only: a `margin` shorthand here would reset margin-inline:auto
+     above and silently un-centre the pill. */
+  margin-block: 0 !important;
   height: var(--sheepfox-pill-height) !important;
   min-height: var(--sheepfox-pill-height) !important;
   max-height: var(--sheepfox-pill-height) !important;
