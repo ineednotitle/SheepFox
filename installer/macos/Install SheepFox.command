@@ -54,7 +54,7 @@ fi
 FIREFOX_RUNNING="$(pgrep -x firefox || true)"
 if [ -n "${FIREFOX_RUNNING}" ]; then
   echo "  Firefox is running. Quit it completely before the change takes effect"
-  echo "  (user.js is only read at startup)."
+  echo "  (config and userChrome.css are only read at startup)."
   echo ""
 fi
 
@@ -66,7 +66,7 @@ echo ""
 if sh ./scripts/install-unix.sh "$@"; then
   echo ""
   echo "  Done. Start Firefox, then press Cmd+T."
-  echo "  Privacy and speed prefs are active; the UI is untouched."
+  echo "  Floating search pill, privacy prefs and speed prefs are active."
   echo "  uBlock Origin + Decentraleyes install on that first start."
 else
   status=$?

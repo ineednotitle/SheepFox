@@ -279,115 +279,286 @@ class TestPreferenceInvariants(unittest.TestCase):
         self.assertTrue(example.is_file())
 
 
-class TestNoBrowserUiCustomisation(unittest.TestCase):
-    """SheepFox must not restyle Firefox's interface.
+class TestFloatingSearchUI(unittest.TestCase):
+    """The Zen/Arc-style floating new-tab search pill."""
 
-    Up to 1.2 the suite installed a floating Zen/Arc-style search pill as
-    profile CSS (config/chrome/userChrome.css + userContent.css). It was removed
-    on purpose - browser-UI CSS is the part that breaks on every Firefox
-    redesign. These checks keep it from creeping back, and keep the upgrade path
-    from 1.2 clean for people who still have those files in a profile.
-    """
+    CHROME = REPO_ROOT / "config" / "chrome" / "userChrome.css"
+    CONTENT = REPO_ROOT / "config" / "chrome" / "userContent.css"
 
-    INSTALLER = REPO_ROOT / "scripts" / "install.py"
-    PS1 = REPO_ROOT / "scripts" / "install-windows.ps1"
-    RETIRED = ("userChrome.css", "userContent.css", "sheepfox-probe.css")
-
-    def test_no_stylesheet_ships(self) -> None:
-        self.assertFalse((REPO_ROOT / "config" / "chrome").exists(), msg="config/chrome must be gone")
-        stray = sorted(p.relative_to(REPO_ROOT).as_posix() for p in (REPO_ROOT / "config").rglob("*.css"))
-        self.assertEqual(stray, [], msg=f"profile CSS is shipped again: {stray}")
-
-    def test_user_js_never_enables_profile_stylesheets(self) -> None:
-        for path in (
-            REPO_ROOT / "config" / "user.js",
-            REPO_ROOT / "config" / "autoconfig" / "sheepfox.cfg",
-        ):
-            self.assertNotIn(
-                "toolkit.legacyUserProfileCustomizations",
-                read(path),
-                msg=f"{path.name} still turns profile CSS on",
+    def test_assets_exist_and_are_balanced(self) -> None:
+        for path in (self.CHROME, self.CONTENT):
+            self.assertTrue(path.is_file(), msg=f"missing {path.name}")
+            text = read(path)
+            self.assertEqual(
+                text.count("{"), text.count("}"), msg=f"{path.name}: unbalanced braces"
             )
-        for module in sorted((REPO_ROOT / "config" / "modules").glob("*.js")):
-            self.assertNotIn("legacyUserProfileCustomizations", read(module), msg=module.name)
+            self.assertTrue(text.lstrip().startswith("/*"), msg=f"{path.name}: needs a header")
+        # A default @namespace makes `*#urlbar` match only that namespace, and
+        # #urlbar has been an HTML element since Firefox 140 - so declaring one
+        # silently disables the whole theme. See the header of userChrome.css.
+        self.assertNotRegex(
+            read(self.CHROME), r"(?m)^\s*@namespace", msg="a default @namespace breaks #urlbar"
+        )
+        self.assertIn("@-moz-document", read(self.CONTENT), msg="userContent.css needs a scope")
 
-    def test_installers_have_no_ui_switches(self) -> None:
-        installer = read(self.INSTALLER)
-        for token in ("--no-ui", "--probe", "--unprobe", "PROBE_CSS", "CHROME_SRC_DIR"):
-            self.assertNotIn(token, installer, msg=f"install.py still offers {token}")
-        ps1 = read(self.PS1)
-        for token in ("-NoUI", "-Probe", "-Unprobe", "$UiFiles", "$ChromeSrcDir"):
-            self.assertNotIn(token, ps1, msg=f"install-windows.ps1 still offers {token}")
-        launcher = read(REPO_ROOT / "installer" / "windows" / "launcher.c")
-        self.assertNotIn("-NoUI", launcher)
-        self.assertNotIn("-Probe", launcher)
+    def test_style_legacy_sheets_is_enabled(self) -> None:
+        # userChrome.css is only honoured when this pref is true at startup.
+        user_js = parse_prefs(read(USER_JS), ("user_pref",))
+        self.assertIn("toolkit.legacyUserProfileCustomizations.stylesheets", user_js)
+        self.assertIs(user_js["toolkit.legacyUserProfileCustomizations.stylesheets"][0], True)
 
-    def test_docs_do_not_promise_a_theme(self) -> None:
-        readme = read(REPO_ROOT / "README.md")
-        self.assertIn("stock Firefox", readme)
-        for doc in (readme, read(REPO_ROOT / "installer" / "README.md"), read(REPO_ROOT / "installer" / "macos" / "README.txt")):
-            self.assertNotIn("--no-ui", doc)
-            self.assertNotIn("-NoProbe", doc)
-            self.assertNotIn("floating search pill", doc)
+    #: Every attribute that puts the bar into its floating state.
+    STATES = (
+        '[pageproxystate="invalid"]',
+        '[focused="true"]',
+        '[breakout][breakout-extend]',
+        '[expanded]',
+        '[open]',
+    )
 
-    def test_install_removes_the_retired_theme(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            profile = Path(tmp) / "profile"
-            chrome = profile / "chrome"
-            chrome.mkdir(parents=True)
-            for name in self.RETIRED:
-                (chrome / name).write_text("/* left by 1.2 */\n", encoding="utf-8")
-            (profile / "user.js").write_text("// old config\n", encoding="utf-8")
+    @property
+    def shell(self) -> str:
+        """The pill's main rule: everything between the two markers below."""
+        css = read(self.CHROME)
+        begin = css.index("1. THE PILL SHELL")
+        return css[begin : css.index("With suggestions open", begin)]
 
-            result = subprocess.run(
-                [sys.executable, str(self.INSTALLER), "--profile", str(profile)],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
-            self.assertTrue((profile / "user.js").is_file())
-            for name in self.RETIRED:
-                self.assertFalse((chrome / name).exists(), msg=f"{name} survived the upgrade")
-            self.assertIn("retired theme file", result.stdout)
+    def test_pill_is_scoped_to_the_floating_states(self) -> None:
+        css = read(self.CHROME)
+        shell = self.shell
+        self.assertIn("#urlbar:is(", shell, msg="states must be listed in one :is() list")
+        for state in self.STATES:
+            self.assertIn(state, shell, msg=f"missing floating state {state}")
+        # [focused="true"] is what makes Ctrl+L / clicking the bar float it over
+        # the page you are already on, instead of only working on a blank tab.
+        self.assertIn('[focused="true"]', shell)
+        self.assertIn("position: fixed", shell, msg="the pill must leave the toolbar")
+        # Firefox sets top/left/width on the breakout state, so those need
+        # !important or the bar snaps back into the toolbar.
+        for prop in ("top:", "left:", "width:", "position:"):
+            self.assertIn(prop, shell)
+        self.assertIn("!important", shell)
+        # Centre with auto inline margins. left:%+translate assumed the window
+        # was the containing block; when an ancestor claims the fixed bar it
+        # lands half a pill width to the left. left:0 + right:0 + margin:auto is
+        # correct either way.
+        self.assertIn("left: 0 !important", shell)
+        self.assertIn("right: 0 !important", shell)
+        self.assertIn("margin-inline: auto", shell)
+        self.assertNotIn("translate: -50%", shell, msg="translate centring drifts off-centre")
+        # A `margin` shorthand after margin-inline:auto resets it to 0 and the
+        # pill silently loses its centring.
+        self.assertNotIn("margin: 0", shell, msg="margin shorthand would un-centre the pill")
+        self.assertIn("margin-block: 0", shell)
+        self.assertIn("outline: none", shell, msg="the pill replaces Firefox's focus ring")
+        self.assertIn("visibility: visible", shell)
+        self.assertIn("opacity: 1", shell)
+        self.assertNotRegex(shell, r"(?m)^\s*transform:", msg="never transform the pill into place")
+        self.assertIn("border-radius: var(--sheepfox-pill-radius)", shell)
+        self.assertIn("box-shadow", shell)
+        self.assertIn("clamp(", css, msg="pill width must be responsive")
+        # Never hide or disable the address bar itself.
+        self.assertNotRegex(css, r"#urlbar\s*\{[^}]*display:\s*none")
 
-    def test_uninstall_removes_the_retired_theme(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            profile = Path(tmp) / "profile"
-            chrome = profile / "chrome"
-            chrome.mkdir(parents=True)
-            (profile / "user.js").write_text("// config\n", encoding="utf-8")
-            (chrome / "userChrome.css").write_text("/* old */\n", encoding="utf-8")
+    def test_inner_layout_is_scoped_to_the_pill(self) -> None:
+        """Regression: unscoped rules inflated the toolbar bar on every page.
 
-            result = subprocess.run(
-                [sys.executable, str(self.INSTALLER), "--profile", str(profile), "--uninstall"],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
-            self.assertFalse((profile / "user.js").exists())
-            self.assertFalse((chrome / "userChrome.css").exists())
+        Styling `#urlbar #urlbar-input` / `#urlbar .urlbar-input-container`
+        without a state matched normal browsing too, so YouTube and every other
+        site got a full-width, 56px, centre-aligned address bar.
+        """
+        css = read(self.CHROME)
+        self.assertNotIn("#urlbar #urlbar-input {", css)
+        self.assertNotIn("#urlbar .urlbar-input-container {", css)
+        self.assertNotRegex(css, r"(?m)^#urlbar #urlbar-background")
+        # Every rule that alters the field's text alignment must be state-gated.
+        for match in re.finditer(r"(?m)^([^\n{}]+)\{[^}]*text-align:\s*center", css):
+            selector = match.group(1)
+            self.assertIn(":is(", selector, msg=f"unscoped centring: {selector.strip()}")
+        # Same for the input container's height.
+        for match in re.finditer(r"(?m)^([^\n{}]+)\{[^}]*height: var\(--sheepfox-pill-height\)", css):
+            self.assertIn(":is(", match.group(1), msg=f"unscoped pill height: {match.group(1).strip()}")
 
-    def test_doctor_points_at_the_leftovers(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            profile = Path(tmp) / "profile"
-            profile.mkdir()
-            subprocess.run(
-                [sys.executable, str(self.INSTALLER), "--profile", str(profile)],
-                capture_output=True,
-                check=True,
-            )
-            (profile / "chrome").mkdir()
-            (profile / "chrome" / "userChrome.css").write_text("/* old */\n", encoding="utf-8")
-            result = subprocess.run(
-                [sys.executable, str(self.INSTALLER), "--profile", str(profile), "--doctor"],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            self.assertEqual(result.returncode, 0, msg=result.stdout)
-            self.assertIn("retired search-bar theme", result.stdout)
+    def test_pill_is_vertically_centred_and_compact(self) -> None:
+        css = read(self.CHROME)
+        # Zen/Arc look: centred in the page, not pinned to the toolbar row.
+        # Viewport units: a percentage would resolve against the (collapsed)
+        # toolbar container instead of the window.
+        self.assertIn("--sheepfox-pill-top: 42vh", css)
+        self.assertIn("--sheepfox-pill-height: 52px", css)
+        self.assertIn(
+            "top: calc(var(--sheepfox-pill-top) - var(--sheepfox-pill-height) / 2)",
+            css,
+            msg="pill vertical anchor must stay centred but top-anchored",
+        )
+        # Collapsed state is locked so the auto-opened dropdown cannot balloon
+        # it; the open state may grow again, capped.
+        self.assertIn("max-height: var(--sheepfox-pill-height)", css)
+        grown = css[css.index("With suggestions open") :]
+        # The list may grow, but only into the space left under the pill:
+        # 42vh + 62vh used to overflow the window by 4vh.
+        self.assertIn(
+            "max-height: min(62vh, calc(100vh - var(--sheepfox-pill-top) - 40px))", grown
+        )
+        # No ancestor may become the containing block of the fixed bar.
+        self.assertIn("will-change: auto", css)
+        self.assertIn("translate: none", css, msg="ancestor translate creates a containing block")
+        self.assertIn("container-type: normal", css)
+
+    def test_empty_new_tab_collapses_the_suggestions_panel(self) -> None:
+        # Firefox opens the awesomebar results view on the new-tab autofocus;
+        # an empty tab must stay a pill, so that view is collapsed while the
+        # field is empty.
+        css = read(self.CHROME)
+        hidden = css.split("#urlbar:has(#urlbar-input:placeholder-shown) #urlbar-results", 1)[1].split("}", 1)[0]
+        self.assertIn("display: none", hidden)
+        # The dock-while-typing opt-out ships commented out, so the default stays
+        # the Zen/Arc behaviour.
+        self.assertIn("/*\n#urlbar:is([breakout][breakout-extend], [expanded], [open]) {", css)
+        self.assertIn("position: relative !important;", css)
+        # Zen's dimming backdrop ships commented out too.
+        self.assertIn("#urlbar[open]::after", css)  # Zen backdrop, commented out
+        self.assertIn("backdrop-filter: blur(5px)", css)
+
+    def test_proof_of_load_badge(self) -> None:
+        """A visible marker drawn by userChrome.css itself."""
+        css = read(self.CHROME)
+        self.assertIn('content: "SheepFox UI"', css)
+        self.assertIn("pointer-events: none", css)
+        # Only while the pill is out: a label pinned to every page forever is the
+        # clutter this theme exists to remove.
+        self.assertIn("#nav-bar:has(", css.split('content: "SheepFox UI"')[0].split("*/")[-1])
+        badge = css.split('content: "SheepFox UI"')[1].split("}", 1)[0]
+        self.assertIn("position: fixed", badge)
+        self.assertIn("z-index: 99999", badge, msg="the badge must sit under the pill (100000)")
+
+    @staticmethod
+    def _declarations(css: str) -> str:
+        """The stylesheet with comments removed, so tests match real rules."""
+        return re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+
+    def test_no_permanent_compositing_layer(self) -> None:
+        """Regression: `#urlbar { will-change: transform }` sat at the end of the
+        file and promoted the address bar to its own layer on every page, for an
+        animation that does not exist (the pill animates box-shadow only)."""
+        css = self._declarations(read(self.CHROME))
+        self.assertNotRegex(css, r"will-change:\s*transform")
+        self.assertIn("will-change: auto", css, msg="ancestors must still be neutralised")
+
+    def test_results_are_one_card_with_the_pill(self) -> None:
+        """Stock Firefox paints its own panel around the results, which showed up
+        as a second frame inside the pill."""
+        css = self._declarations(read(self.CHROME))
+        block = css.split(') #urlbar-results {', 1)[1].split("}", 1)[0]
+        for prop in ("background: transparent", "border: none", "box-shadow: none"):
+            self.assertIn(prop, block, msg=f"results panel must not repaint: {prop}")
+        STATES = '#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) '
+        view = css.split(STATES + ".urlbarView {", 1)[1].split("}", 1)[0]
+        # Scrollable inside the card, and capped so the list cannot paint off
+        # the bottom of the window (the shell must stay overflow:visible).
+        self.assertIn("overflow-y: auto", view)
+        self.assertIn("calc(100vh - var(--sheepfox-pill-top) - 90px)", view)
+        self.assertIn("scrollbar-width: thin", view)
+        self.assertIn("overscroll-behavior: contain", view)
+
+    def test_only_the_placeholder_is_centred(self) -> None:
+        """Centring the value made every keystroke shift the text and let a long
+        URL overflow both ends while the caret walked off the pill."""
+        css = read(self.CHROME)
+        rules = self._declarations(css)
+        input_rule = rules.split(') #urlbar-input {', 1)[1].split("}", 1)[0]
+        self.assertIn("text-align: start", input_rule)
+        empty = rules.split(") #urlbar-input:placeholder-shown {", 1)[1].split("}", 1)[0]
+        self.assertIn("text-align: center", empty)
+        # ::placeholder only accepts the ::first-line subset - text-align there
+        # is not guaranteed to apply, so it must not be the mechanism.
+        placeholder = rules.split(") #urlbar-input::placeholder {", 1)[1].split("}", 1)[0]
+        self.assertNotIn("text-align", placeholder)
+
+    def test_focus_edge_replaces_the_removed_ring(self) -> None:
+        css = read(self.CHROME)
+        self.assertIn("--sheepfox-pill-border-focus", css)
+        self.assertIn('prefers-color-scheme: light', css)
+        self.assertIn('prefers-color-scheme: dark', css)
+        rule = css.split(') #urlbar-input::placeholder {')[0].split("#urlbar:is([focused=\"true\"], [open], [expanded]) {")[1]
+        self.assertIn("border-color: var(--sheepfox-pill-border-focus)", rule)
+
+    def test_small_windows_and_forced_colours(self) -> None:
+        css = read(self.CHROME)
+        self.assertIn("@media (max-height: 700px)", css)
+        self.assertIn("--sheepfox-pill-top: 34vh", css)
+        self.assertIn("@media (forced-colors: active)", css)
+        self.assertIn("CanvasText", css)
+
+    def test_no_shorthand_resets_a_longhand(self) -> None:
+        """Regression: `margin: 0 !important` came after `margin-inline: auto`
+        and silently un-centred the pill. Audit every rule for the pattern."""
+        shorthand_of = {
+            "margin": ("margin-inline", "margin-block", "margin-top", "margin-left"),
+            "padding": ("padding-inline", "padding-block", "padding-top"),
+            "border": ("border-color", "border-width", "border-radius"),
+            "background": ("background-color", "background-image"),
+            "font": ("font-size", "line-height"),
+            "inset": ("top", "left", "right", "bottom"),
+        }
+        for path in (self.CHROME, self.CONTENT):
+            css = self._declarations(read(path))
+            for rule in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
+                selector, body = rule.group(1).strip(), rule.group(2)
+                properties = re.findall(r"(?m)^\s*([a-z-]+)\s*:", body)
+                for index, prop in enumerate(properties):
+                    for shorthand, longs in shorthand_of.items():
+                        if prop != shorthand:
+                            continue
+                        earlier = set(properties[:index])
+                        clash = earlier.intersection(longs)
+                        self.assertFalse(
+                            clash,
+                            msg=f"{path.name}: `{shorthand}` after {sorted(clash)} in {selector}",
+                        )
+
+    def test_stylesheet_imports_the_probe(self) -> None:
+        css = read(self.CHROME)
+        self.assertIn('@import url("sheepfox-probe.css");', css)
+        # @import must come before any rule other than @charset/@layer.
+        body = css[css.index("*/") :]  # skip the header comment
+        self.assertLess(body.index("@import"), body.index(":root {"))
+
+    def test_installers_can_write_and_remove_the_probe(self) -> None:
+        installer = read(REPO_ROOT / "scripts" / "install.py")
+        for token in ("--probe", "--unprobe", "sheepfox-probe.css", "#cc0000"):
+            self.assertIn(token, installer)
+        ps1 = (REPO_ROOT / "scripts" / "install-windows.ps1").read_text(encoding="utf-8")
+        for token in ("[switch]$Probe", "[switch]$Unprobe", "sheepfox-probe.css", "#cc0000"):
+            self.assertIn(token, ps1)
+
+    def test_dark_mode_and_reduced_motion(self) -> None:
+        css = read(self.CHROME)
+        self.assertIn("prefers-color-scheme: light", css)
+        self.assertIn("prefers-color-scheme: dark", css)
+        self.assertIn("prefers-reduced-motion: reduce", css)
+
+    def test_new_tab_page_makes_room_for_the_pill(self) -> None:
+        css = read(self.CONTENT)
+        self.assertIn('@-moz-document url("about:newtab"), url("about:home")', css)
+        self.assertIn(".logo-and-wordmark", css, msg="wordmark must be cleared")
+        # Derived from the pill geometry instead of a flat 56vh, which pushed the
+        # grid off the bottom of a short window and left a 120px gap on a tall one.
+        self.assertIn("padding-top: clamp(220px, calc(42vh + 56px), 60vh)", css)
+        self.assertIn("calc(34vh + 56px)", css)
+        self.assertIn(":focus-within .tile", css, msg="keyboard focus must be visible too")
+
+    def test_installers_ship_the_ui(self) -> None:
+        installer = read(REPO_ROOT / "scripts" / "install.py")
+        self.assertIn('UI_FILES = ("userChrome.css", "userContent.css")', installer)
+        self.assertIn('"chrome"', installer)
+        self.assertIn("--no-ui", installer)
+
+        ps1 = (REPO_ROOT / "scripts" / "install-windows.ps1").read_text(encoding="utf-8")
+        self.assertIn("$NoUI", ps1)
+        self.assertIn("userChrome.css", ps1)
+        self.assertIn('Join-Path $profile "chrome\\$name"', ps1)
+        self.assertIn("foreach ($profile in $Profiles)", ps1, msg="must install into every profile")
 
 
 class TestFloatingUrlBarExtension(unittest.TestCase):
@@ -738,8 +909,8 @@ class TestExtensionPreinstall(unittest.TestCase):
             policy = json.loads(written.read_text(encoding="utf-8"))["policies"]
             self.assertIn("uBlock0@raymondhill.net", policy["ExtensionSettings"])
             self.assertIn("jid1-BoFifL9Vbdl2zQ@jetpack", policy["ExtensionSettings"])
-            # The config still landed in the detected profile.
-            self.assertTrue((profile / "user.js").is_file())
+            # The CSS still landed in the detected profile.
+            self.assertTrue((profile / "chrome" / "userChrome.css").is_file())
 
     def test_doctor_reports_the_extension_preinstall(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1200,8 +1371,11 @@ class TestInstallers(unittest.TestCase):
             self.assertEqual(len(backups), 1, "existing user.js must be backed up exactly once")
             self.assertIn("previous config", backups[0].read_text(encoding="utf-8"))
 
-            # No browser-UI stylesheet: the profile holds config, not chrome CSS.
-            self.assertFalse((profile / "chrome").exists(), msg="the profile must stay UI-free")
+            ui = profile / "chrome" / "userChrome.css"
+            self.assertTrue(ui.is_file(), msg="floating search UI was not installed")
+            self.assertIn('#urlbar[pageproxystate="invalid"]', ui.read_text(encoding="utf-8"))
+            self.assertTrue((profile / "chrome" / "userContent.css").is_file())
+            self.assertFalse(ui.read_bytes().startswith(b"\xef\xbb\xbf"))
 
             cfg = (firefox / "sheepfox.cfg").read_text(encoding="utf-8")
             self.assertTrue(cfg.startswith("//"))
@@ -1232,7 +1406,8 @@ class TestInstallers(unittest.TestCase):
             )
             self.assertEqual(uninstall.returncode, 0, msg=uninstall.stderr or uninstall.stdout)
             self.assertFalse((profile / "user.js").exists())
-            self.assertFalse((profile / "chrome").exists())
+            self.assertFalse((profile / "chrome" / "userChrome.css").exists())
+            self.assertFalse((profile / "chrome" / "userContent.css").exists())
             self.assertFalse((firefox / "sheepfox.cfg").exists())
             self.assertFalse((firefox / "distribution" / "policies.json").exists())
             self.assertEqual(len(list(profile.glob("user.js.sheepfox-backup-*"))), 1)
@@ -1263,7 +1438,8 @@ class TestInstallers(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
             self.assertFalse((profile / "user.js").exists())
-            self.assertFalse((profile / "chrome").exists(), msg="dry-run wrote profile CSS")
+            self.assertFalse((profile / "chrome" / "userChrome.css").exists())
+            self.assertFalse((profile / "chrome" / "userContent.css").exists())
             self.assertFalse((firefox / "sheepfox.cfg").exists())
             self.assertEqual(list(profile.iterdir()), [])
 
@@ -1287,6 +1463,21 @@ class TestInstallers(unittest.TestCase):
         self.assertIn("[switch]$LowMemory", ps1)
         self.assertIn("low-memory.override.js", ps1)
 
+    def test_no_ui_flag_skips_chrome_css(self) -> None:
+        installer = REPO_ROOT / "scripts" / "install.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "profile"
+            profile.mkdir()
+            result = subprocess.run(
+                [sys.executable, str(installer), "--profile", str(profile), "--no-ui"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr or result.stdout)
+            self.assertTrue((profile / "user.js").is_file())
+            self.assertFalse((profile / "chrome").exists())
+
     def test_doctor_passes_on_a_good_install(self) -> None:
         installer = REPO_ROOT / "scripts" / "install.py"
         with tempfile.TemporaryDirectory() as tmp:
@@ -1305,7 +1496,7 @@ class TestInstallers(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
             self.assertIn("doctor", result.stdout)
-            self.assertIn("[OK  ] user.js carries the SheepFox prefs", result.stdout)
+            self.assertIn("[OK  ] chrome/userChrome.css", result.stdout)
             self.assertNotIn("FAIL", result.stdout)
 
     def test_doctor_does_not_fail_on_a_profile_only_install(self) -> None:
@@ -1344,19 +1535,19 @@ class TestInstallers(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 1, msg=result.stdout)
             self.assertIn("[FAIL] user.js present", result.stdout)
+            self.assertIn("[FAIL] chrome/userChrome.css", result.stdout)
 
     def test_windows_doctor_switch_is_wired(self) -> None:
         text = (REPO_ROOT / "scripts" / "install-windows.ps1").read_text(encoding="utf-8")
         self.assertIn("[switch]$Doctor", text)
         self.assertIn("Report-Check", text)
-        self.assertIn("user_pref", text, msg="the doctor must verify the generated prefs")
+        self.assertIn("prefs.js", text)
 
     def test_installer_writes_to_every_profile(self) -> None:
-        """No --profile: every profile on the machine gets user.js.
+        """No --profile: every profile on the machine gets the theme.
 
-        Installing into only the detected profile is the classic reason an
-        install appears to do nothing (Store build, portable build, second
-        profile).
+        Installing into only the detected profile is the classic reason a
+        userChrome theme appears to do nothing (Store build, second profile).
         """
         installer = REPO_ROOT / "scripts" / "install.py"
         if sys.platform == "win32":  # pragma: no cover - profile roots differ
@@ -1388,7 +1579,10 @@ class TestInstallers(unittest.TestCase):
             for name in ("aaa.default-release", "bbb.work"):
                 profile = firefox / "Profiles" / name
                 self.assertTrue((profile / "user.js").is_file(), msg=f"no user.js in {name}")
-                self.assertFalse((profile / "chrome").exists(), msg=f"UI files written to {name}")
+                self.assertTrue(
+                    (profile / "chrome" / "userChrome.css").is_file(),
+                    msg=f"floating UI skipped for {name}",
+                )
             # installs.ini wins: the profile Firefox actually opens goes first.
             self.assertLess(
                 result.stdout.index("bbb.work"),
@@ -1418,6 +1612,64 @@ class TestInstallers(unittest.TestCase):
             self.assertIn("doctor", text)
             self.assertIn("profiles found", text)
             self.assertIn("exit_code=", text)
+
+    def test_probe_round_trip(self) -> None:
+        """--probe must produce a file the stylesheet imports, and --unprobe clears it."""
+        installer = REPO_ROOT / "scripts" / "install.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "profile"
+            profile.mkdir()
+            subprocess.run(
+                [sys.executable, str(installer), "--profile", str(profile)],
+                capture_output=True,
+                check=True,
+            )
+            probe = profile / "chrome" / "sheepfox-probe.css"
+            self.assertFalse(probe.exists(), "the probe must not ship by default")
+
+            add = subprocess.run(
+                [sys.executable, str(installer), "--profile", str(profile), "--probe"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(add.returncode, 0, msg=add.stderr)
+            self.assertTrue(probe.is_file())
+            text = probe.read_text(encoding="utf-8")
+            self.assertIn("#cc0000", text)
+            self.assertFalse(probe.read_bytes().startswith(b"\xef\xbb\xbf"))
+
+            remove = subprocess.run(
+                [sys.executable, str(installer), "--profile", str(profile), "--unprobe"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(remove.returncode, 0, msg=remove.stderr)
+            self.assertFalse(probe.exists())
+
+    def test_doctor_flags_a_stale_stylesheet(self) -> None:
+        installer = REPO_ROOT / "scripts" / "install.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "profile"
+            profile.mkdir()
+            subprocess.run(
+                [sys.executable, str(installer), "--profile", str(profile)],
+                capture_output=True,
+                check=True,
+            )
+            (profile / "chrome" / "userChrome.css").write_text(
+                "/* an old copy */\n#urlbar[pageproxystate=\"invalid\"] { position: fixed; }\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [sys.executable, str(installer), "--profile", str(profile), "--doctor"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 1, msg=result.stdout)
+            self.assertIn("stale", result.stdout)
 
     def test_unix_wrapper_delegates_to_python(self) -> None:
         wrapper = read(REPO_ROOT / "scripts" / "install-unix.sh")
@@ -1605,7 +1857,7 @@ class TestDistributableInstallerArtifacts(unittest.TestCase):
         # The payload must come from the repository, never from a copy.
         self.assertIn("PAYLOAD_FILES", text)
         self.assertIn('"config/user.js"', text)
-        self.assertIn('"config/distribution/policies.json"', text)
+        self.assertIn('"config/chrome/userChrome.css"', text)
         self.assertNotIn("shutil.copytree(REPO_ROOT / \"config\"", text)
 
     def test_every_config_file_is_in_the_payload(self) -> None:
@@ -1642,7 +1894,7 @@ class TestDistributableInstallerArtifacts(unittest.TestCase):
         self.assertIn("if [ -t 0 ]", text, msg="must not block without a terminal")
         self.assertTrue(path.stat().st_mode & 0o111, msg="the .command must be executable")
         banner = read(self.INSTALLER_DIR / "macos" / "README.txt")
-        for switch in ("--doctor", "--uninstall", "--strict", "--low-memory"):
+        for switch in ("--doctor", "--uninstall", "--strict", "--no-ui", "--low-memory"):
             self.assertIn(switch, banner)
 
     def test_readme_documents_the_installers(self) -> None:

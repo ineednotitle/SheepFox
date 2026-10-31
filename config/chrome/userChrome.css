@@ -1,0 +1,365 @@
+/* ============================================================================
+   (SheepFox) Firefox — userChrome.css
+   "Floating search" UI: the address bar detaches from the toolbar and floats in
+   the middle of the window as a rounded pill — the Zen / Arc look — whenever you
+   focus it (click, Ctrl+L, Ctrl+K) or open a new tab. Blur it, or load a page,
+   and it docks back into the stock toolbar.
+
+   Requires: toolkit.legacyUserProfileCustomizations.stylesheets = true
+             (already set by config/modules/03-cleanfox.js)
+
+   Installed to: <profile>/chrome/userChrome.css
+   Revert:       delete this file, or run the installer with --no-ui.
+
+   =========================================================================
+   TWO RULES THAT MAKE OR BREAK THIS FILE
+
+   1. NO `@namespace`. An unprefixed @namespace sets the DEFAULT namespace,
+      which applies to type selectors *and to the universal selector* — and
+      `#urlbar` is `*#urlbar`. Firefox built the bar as `<hbox id="urlbar">`
+      (XUL) until ~135, but since 140 it is plain HTML (`<html:div id="urlbar">`,
+      `<html:moz-urlbar id="urlbar">` since 152). With the XUL boilerplate that
+      every snippet on the internet starts with, every #urlbar rule silently
+      matches nothing.
+
+   2. EVERY visual rule is scoped to a floating state. Earlier builds styled
+      `#urlbar #urlbar-input` and `.urlbar-input-container` globally, which
+      inflated and re-centred the *toolbar* bar on every normal page.
+
+   =========================================================================
+   THE FLOATING STATES (all of them, so one file covers every Firefox)
+     [pageproxystate="invalid"]   blank/new tab, or an address being edited
+     [focused="true"]             the bar has focus over any page  <- Ctrl+L
+     [breakout][breakout-extend]  the megabar breakout, Firefox ~72-151
+     [expanded]                   what SmartbarInput.mjs sets, Firefox 152+
+     [open]                       the results view is open
+   ============================================================================ */
+
+@import url("sheepfox-probe.css");
+
+/* --- Tokens: one place to tune the pill ------------------------------------ */
+:root {
+  --sheepfox-pill-width: clamp(320px, 46vw, 620px);
+  --sheepfox-pill-height: 52px;
+  --sheepfox-pill-radius: 26px;
+  /* Viewport units on purpose: a percentage resolves against the pill's
+     containing block, and once #urlbar is fixed its toolbar container is a few
+     pixels tall — 42% of that put the pill above the window. Use 50vh for
+     dead-centre. */
+  --sheepfox-pill-top: 42vh;
+  --sheepfox-pill-shadow:
+    0 18px 44px rgba(0, 0, 0, 0.22),
+    0 2px 10px rgba(0, 0, 0, 0.12);
+  --sheepfox-pill-shadow-hover:
+    0 24px 60px rgba(0, 0, 0, 0.28),
+    0 3px 14px rgba(0, 0, 0, 0.16);
+  --sheepfox-pill-speed: 160ms;
+}
+
+/* Short windows (a laptop in split view, a small VM): lift the pill so the
+   results list still has somewhere to go. */
+@media (max-height: 700px) {
+  :root {
+    --sheepfox-pill-top: 34vh;
+  }
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --sheepfox-pill-bg: rgba(255, 255, 255, 0.96);
+    --sheepfox-pill-border: rgba(15, 23, 42, 0.10);
+    --sheepfox-pill-border-focus: rgba(15, 23, 42, 0.26);
+    --sheepfox-pill-text: #0f172a;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --sheepfox-pill-bg: rgba(32, 32, 36, 0.96);
+    --sheepfox-pill-border: rgba(255, 255, 255, 0.14);
+    --sheepfox-pill-border-focus: rgba(255, 255, 255, 0.34);
+    --sheepfox-pill-text: #f4f4f5;
+  }
+}
+
+/* The pill escapes the boxes the toolbar normally clips its children to, and no
+   ancestor may become the containing block for a position:fixed descendant
+   (a transform / filter / backdrop-filter / perspective / contain /
+   will-change anywhere up the chain would make top/left relative to a 40px
+   toolbar instead of the window). */
+#main-window,
+#titlebar,
+#navigator-toolbox,
+#nav-bar,
+#urlbar-container,
+#urlbar > .urlbar-input-container {
+  transform: none !important;
+  translate: none !important;
+  rotate: none !important;
+  scale: none !important;
+  filter: none !important;
+  perspective: none !important;
+  backdrop-filter: none !important;
+  contain: none !important;
+  container-type: normal !important;
+  will-change: auto !important;
+  overflow: visible !important;
+}
+
+/* Keep the floating bar above the page, not painted underneath it. */
+#navigator-toolbox {
+  position: relative;
+  z-index: 9999 !important;
+}
+
+/* ----------------------------------------------------------------------------
+   1. THE PILL SHELL
+   ------------------------------------------------------------------------- */
+#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) {
+  position: fixed !important;
+  /* Centred on --sheepfox-pill-top, TOP edge anchored so an open suggestion
+     list grows downwards instead of dragging the field up. */
+  top: calc(var(--sheepfox-pill-top) - var(--sheepfox-pill-height) / 2) !important;
+  bottom: auto !important;
+  /* Centred with auto inline margins across the full width, NOT with
+     left:50%+translate. The translate version assumed the containing block was
+     the window; when an ancestor claims the fixed element, the bar ends up
+     shifted left by half its own width. left:0 + right:0 + margin:auto centres
+     inside whatever box it lands in, so it is right either way. */
+  left: 0 !important;
+  right: 0 !important;
+  margin-inline: auto !important;
+  translate: none !important;
+  width: var(--sheepfox-pill-width) !important;
+  min-width: var(--sheepfox-pill-width) !important;
+  max-width: var(--sheepfox-pill-width) !important;
+  /* margin-block only: a `margin` shorthand here would reset margin-inline:auto
+     above and silently un-centre the pill. */
+  margin-block: 0 !important;
+  height: var(--sheepfox-pill-height) !important;
+  min-height: var(--sheepfox-pill-height) !important;
+  max-height: var(--sheepfox-pill-height) !important;
+  padding: 0 !important;
+  border: 1px solid var(--sheepfox-pill-border) !important;
+  border-radius: var(--sheepfox-pill-radius) !important;
+  background: var(--sheepfox-pill-bg) !important;
+  box-shadow: var(--sheepfox-pill-shadow) !important;
+  /* Firefox draws a violet focus ring on the field; the pill is the affordance. */
+  outline: none !important;
+  z-index: 100000 !important;
+  overflow: visible !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  /* box-shadow/border/background only: `top` never changes while the bar
+     floats, and transitioning it would animate a layout property for nothing. */
+  transition:
+    box-shadow var(--sheepfox-pill-speed) ease,
+    border-color var(--sheepfox-pill-speed) ease,
+    background-color var(--sheepfox-pill-speed) ease !important;
+}
+
+/* The pill removed Firefox's violet ring, so it owes keyboard users a visible
+   edge of its own. */
+#urlbar:is([focused="true"], [open], [expanded]) {
+  border-color: var(--sheepfox-pill-border-focus) !important;
+}
+
+/* With suggestions open, let the pill grow downwards - but never past the
+   bottom of the window. A flat 62vh overflowed: the shell starts at
+   --sheepfox-pill-top (42vh), and 42 + 62 is more than 100. */
+#urlbar:is([breakout][breakout-extend], [expanded], [open]) {
+  height: auto !important;
+  max-height: min(62vh, calc(100vh - var(--sheepfox-pill-top) - 40px)) !important;
+}
+
+/* Firefox paints the bar's surface on #urlbar-background (a XUL <hbox> up to
+   Firefox ~151, gone in the moz-urlbar rewrite); it is filled here when it
+   exists, while #urlbar itself is always filled by the shell rule above. */
+#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) #urlbar-background {
+  height: 100% !important;
+  /* No border here: the shell already draws one, and a second 1px line inside
+     it rendered as a double edge on Firefox <= 151. */
+  border: none !important;
+  border-radius: var(--sheepfox-pill-radius) !important;
+  background: var(--sheepfox-pill-bg) !important;
+  box-shadow: none !important;
+  outline: none !important;
+  animation: none !important;
+}
+
+/* ----------------------------------------------------------------------------
+   2. AN EMPTY FIELD IS A PILL, NOT A FORM
+   Firefox focuses the address bar on a new tab and auto-opens the results view.
+   While the field is empty that view is collapsed; typing brings it straight
+   back (the field is no longer empty).
+   ------------------------------------------------------------------------- */
+#urlbar:has(#urlbar-input:placeholder-shown) #urlbar-results,
+#urlbar:has(#urlbar-input:placeholder-shown) .urlbarView {
+  display: none !important;
+}
+
+#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) #urlbar-results {
+  /* Pin the panel to the pill instead of letting it keep the toolbar geometry:
+     that mismatch is what made the list sit half a pill width to the right.
+     Stock Firefox also paints its own background + border here, which showed up
+     as a second frame inside the pill - the pill is the only surface. */
+  margin: 8px 0 10px !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  inset-inline: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) .urlbarView {
+  /* Scroll inside the card instead of letting the list paint past the pill and
+     off the bottom of the window: the shell's max-height cannot clip it,
+     because it must stay overflow:visible for the shadow. */
+  max-height: min(52vh, calc(100vh - var(--sheepfox-pill-top) - 90px)) !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  overscroll-behavior: contain !important;
+  scrollbar-width: thin !important;
+  border-radius: 0 0 var(--sheepfox-pill-radius) var(--sheepfox-pill-radius) !important;
+}
+
+/* ----------------------------------------------------------------------------
+   3. INNER LAYOUT — scoped to the floating states only, so the toolbar bar on a
+   normal page keeps its stock height and alignment.
+   ------------------------------------------------------------------------- */
+#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) .urlbar-input-container {
+  height: var(--sheepfox-pill-height) !important;
+  padding-inline: 20px 16px !important;
+  border: none !important;
+  background: transparent !important;
+  align-items: center !important;
+}
+
+#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) #urlbar-input {
+  font-size: 15px !important;
+  /* Only the placeholder is centred. Centring the *value* made every keystroke
+     shift the text, and a long URL overflowed both ends while the caret walked
+     off the pill - the one place where "prettier" is also "unusable". */
+  text-align: start !important;
+  color: var(--sheepfox-pill-text) !important;
+  caret-color: var(--sheepfox-pill-text) !important;
+}
+
+/* An empty field is centred; the moment there is a value it starts at the left.
+   (:placeholder-shown is the reliable switch - ::placeholder only accepts the
+   ::first-line subset of properties, so `text-align` there is not guaranteed
+   to do anything.) */
+#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) #urlbar-input:placeholder-shown {
+  text-align: center !important;
+}
+
+#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) #urlbar-input::placeholder {
+  opacity: 0.72 !important;
+}
+
+/* Keep the pill clean on a blank tab: no shield, no page-action clutter.
+   (Firefox 152+ renamed the identity box to #trust-icon-container.) */
+#urlbar[pageproxystate="invalid"] #identity-box,
+#urlbar[pageproxystate="invalid"] #trust-icon-container,
+#urlbar[pageproxystate="invalid"] #page-action-buttons,
+#urlbar[pageproxystate="invalid"] .urlbar-go-button,
+#urlbar[pageproxystate="invalid"] .urlbar-icon-wrapper {
+  display: none !important;
+}
+
+/* Subtle lift on hover — a hint that it is one big target. */
+#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]):hover {
+  box-shadow: var(--sheepfox-pill-shadow-hover) !important;
+}
+
+/* Make the toolbar recede while the pill is out, so it reads as floating on the
+   page rather than sitting in a strip. */
+#nav-bar:has(#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open])) {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+/* ----------------------------------------------------------------------------
+   4. PROOF-OF-LOAD BADGE
+   A tiny label in the corner of the window, drawn by this stylesheet. If you can
+   read "SheepFox UI", this file is parsed and applied — so anything else that
+   looks wrong is a selector, not an install. Delete this block to remove it.
+   ------------------------------------------------------------------------- */
+/* Only while the pill is floating. A permanent label in the corner of every
+   page is exactly the kind of clutter this theme exists to remove; press Ctrl+L
+   (or open a new tab) and it is there to confirm the stylesheet loaded. */
+#nav-bar:has(#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]))::after {
+  content: "SheepFox UI" !important;
+  position: fixed !important;
+  right: 10px !important;
+  bottom: 8px !important;
+  padding: 3px 8px !important;
+  font: 10px/1.4 system-ui, sans-serif !important;
+  color: var(--sheepfox-pill-text) !important;
+  background: var(--sheepfox-pill-bg) !important;
+  border: 1px solid var(--sheepfox-pill-border) !important;
+  border-radius: 999px !important;
+  opacity: 0.55 !important;
+  pointer-events: none !important;
+  z-index: 99999 !important;
+}
+
+/* ----------------------------------------------------------------------------
+   5. OPT-IN — Zen's dimmed backdrop behind the floating bar
+   ------------------------------------------------------------------------- */
+/*
+#urlbar[open]::after {
+  content: "" !important;
+  position: fixed !important;
+  pointer-events: none !important;
+  inset: 0 !important;
+  background-color: rgba(0, 0, 0, 0.30) !important;
+  backdrop-filter: blur(5px) !important;
+  z-index: -1 !important;
+}
+*/
+
+/* ----------------------------------------------------------------------------
+   6. OPT-OUT — "dock while typing"
+   Uncomment if you prefer the bar to snap back into the toolbar as soon as you
+   start typing instead of staying centred with the results open under it.
+   ------------------------------------------------------------------------- */
+/*
+#urlbar:is([breakout][breakout-extend], [expanded], [open]) {
+  position: relative !important;
+  top: auto !important;
+  left: auto !important;
+  translate: none !important;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  height: auto !important;
+  max-height: none !important;
+}
+*/
+
+/* ----------------------------------------------------------------------------
+   7. POLISH
+   ------------------------------------------------------------------------- */
+/* No `will-change` anywhere on the bar. It used to carry `will-change:
+   transform` here, which promoted the address bar to its own compositing layer
+   on every page for an animation that does not exist - the pill only animates
+   box-shadow, and the docked bar animates nothing at all. */
+
+/* Windows High Contrast / forced colours: the translucent pill is flattened by
+   the OS, so the edge has to come from the system palette. */
+@media (forced-colors: active) {
+  #urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) {
+    border: 1px solid CanvasText !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #urlbar,
+  #urlbar[pageproxystate="invalid"],
+  #urlbar[focused="true"] {
+    transition: none !important;
+  }
+}

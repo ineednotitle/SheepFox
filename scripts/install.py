@@ -3,21 +3,22 @@
 (SheepFox) Firefox — Cross-Platform Drop-In Installer & Profile Manager
 Applies SheepFox speed & privacy configurations to stock Mozilla Firefox:
   1. Per-profile `user.js` (+ optional personal or `--strict` overrides)
-  2. SheepShields Enterprise Policy (`distribution/policies.json`), which
+  2. Per-profile UI theme: `chrome/userChrome.css` + `chrome/userContent.css`
+     (the floating Zen/Arc-style new-tab search pill; skip with --no-ui)
+  3. SheepShields Enterprise Policy (`distribution/policies.json`), which
      preinstalls uBlock Origin + Decentraleyes and locks the privacy defaults
-  3. Optional `--system` AutoConfig (`sheepfox.cfg` + `local-settings.js`)
-
-SheepFox does not style Firefox's browser UI: the profile only ever receives a
-`user.js`, so the interface stays exactly the one Mozilla ships.
+  4. Optional `--system` AutoConfig (`sheepfox.cfg` + `local-settings.js`)
 """
 
 from __future__ import annotations
 
 import argparse
 import configparser
+import hashlib
 import json
 import os
 import platform
+import re
 import shlex
 import shutil
 import subprocess
@@ -34,16 +35,38 @@ CUSTOM_OVERRIDE_SRC = REPO_ROOT / "config" / "overrides" / "user-overrides.js"
 POLICIES_SRC = REPO_ROOT / "config" / "distribution" / "policies.json"
 AUTOCONFIG_CFG_SRC = REPO_ROOT / "config" / "autoconfig" / "sheepfox.cfg"
 LOCAL_SETTINGS_SRC = REPO_ROOT / "config" / "autoconfig" / "defaults" / "pref" / "local-settings.js"
-#: Files older SheepFox releases (<= 1.2) wrote into the profile's `chrome/`
-#: directory for the floating-search theme. That theme is gone; `--uninstall`
-#: and the doctor still recognise these so an upgrade cleans up after itself.
-LEGACY_UI_FILES = ("userChrome.css", "userContent.css", "sheepfox-probe.css")
+CHROME_SRC_DIR = REPO_ROOT / "config" / "chrome"
+#: Profile-level CSS: the floating new-tab search pill (Zen/Arc style)
+UI_FILES = ("userChrome.css", "userContent.css")
 #: Extensions SheepShields preinstalls through the policy file. The names are
 #: only used for the human-readable log lines.
 SHEEPFOX_EXTENSIONS = {
     "uBlock0@raymondhill.net": "uBlock Origin",
     "jid1-BoFifL9Vbdl2zQ@jetpack": "Decentraleyes",
 }
+#: Optional probe that userChrome.css @imports; proves the stylesheet is read.
+PROBE_FILE = "sheepfox-probe.css"
+PROBE_CSS = """/* (SheepFox) CSS load probe.
+   Written by `install.py --probe`, removed by `--unprobe`.
+   If the top of the window is RED, Firefox is definitely reading userChrome.css
+   from this profile; if it is not, the stylesheet is not being loaded at all
+   (wrong profile, pref off, or Firefox was never restarted).
+
+   Painted on #navigator-toolbox, not #nav-bar: userChrome.css makes the toolbar
+   transparent while the pill floats, and that rule is more specific - the red
+   used to vanish exactly when you were testing the floating state. The outline
+   doubles the #urlbar id for the same reason: it has to outrank the pill's own
+   `outline: none`. */
+#navigator-toolbox {
+  background-color: #cc0000 !important;
+}
+#urlbar#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) {
+  outline: 3px solid #00ff88 !important;
+  outline-offset: -3px !important;
+}
+"""
+
+
 def candidate_profile_roots() -> list[Path]:
     system = platform.system()
     home = Path.home()
@@ -52,8 +75,8 @@ def candidate_profile_roots() -> list[Path]:
         local = Path(os.environ.get("LOCALAPPDATA", home / "AppData" / "Local"))
         roots = [appdata / "Mozilla" / "Firefox"]
         # Microsoft Store (MSIX) builds redirect AppData, so their profile is
-        # NOT under %APPDATA%. This is the single most common reason a per-profile
-        # install "does nothing" on Windows.
+        # NOT under %APPDATA%. This is the single most common reason a userChrome
+        # theme "does nothing" on Windows.
         packages = local / "Packages"
         if packages.is_dir():
             for package in sorted(packages.glob("Mozilla.Firefox_*")):
@@ -182,7 +205,7 @@ def all_profiles() -> list[Path]:
     """Every Firefox profile on this machine, across every install type.
 
     Installing into all of them removes profile detection as a failure mode:
-    the config lands wherever Firefox actually happens to run.
+    the CSS lands wherever Firefox actually happens to run.
     """
     found: list[Path] = []
     for root in candidate_profile_roots():
@@ -218,8 +241,28 @@ def read_firefox_version(firefox_dir: Path | None) -> str:
     return "unknown"
 
 
+def pref_value_from_prefs_js(profile_dir: Path, name: str) -> object | None:
+    """Return the value Firefox last saved for *name* in prefs.js, else None."""
+    prefs_js = profile_dir / "prefs.js"
+    if not prefs_js.is_file():
+        return None
+    pattern = re.compile(r'^user_pref\("' + re.escape(name) + r'",\s*(.+?)\);\s*$', re.MULTILINE)
+    match = pattern.search(prefs_js.read_text(encoding="utf-8", errors="replace"))
+    if not match:
+        return None
+    raw = match.group(1).strip()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return raw.strip('"')
+
+
+def css_hash(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else ""
+
+
 def doctor(profile_dir: Path | None, firefox_dir: Path | None) -> int:
-    """Explain whether the SheepFox config is installed, and why not."""
+    """Explain whether the floating-search UI can load, and why not."""
     print("=== (SheepFox) Firefox doctor ===")
     version = read_firefox_version(firefox_dir)
     if firefox_dir:
@@ -248,23 +291,43 @@ def doctor(profile_dir: Path | None, firefox_dir: Path | None) -> int:
     report(user_js.is_file(), "user.js present")
     if user_js.is_file():
         text = user_js.read_text(encoding="utf-8", errors="replace")
-        count = text.count("user_pref(")
-        report(count >= 100, "user.js carries the SheepFox prefs", f"{count} user_pref lines")
+        report(
+            'user_pref("toolkit.legacyUserProfileCustomizations.stylesheets", true);' in text,
+            "user.js enables userChrome.css",
+        )
 
-    # SheepFox <= 1.2 also installed a floating-search stylesheet. It is gone,
-    # but a profile upgraded from that version still has the file: say so once,
-    # and point at the one command that removes it.
-    leftovers = [path for path in (profile_dir / "chrome" / name for name in LEGACY_UI_FILES) if path.is_file()]
-    if leftovers:
-        print("  [info] this profile still has files from the retired search-bar theme:")
-        for path in leftovers:
-            print(f"         {path}")
-        print("         the theme is no longer shipped - drop it with:  python3 scripts/install.py --uninstall")
+    chrome_dir = profile_dir / "chrome"
+    for name, minimum in (("userChrome.css", 2000), ("userContent.css", 400)):
+        target = chrome_dir / name
+        size = target.stat().st_size if target.is_file() else 0
+        report(target.is_file() and size >= minimum, f"chrome/{name}", f"{size} bytes")
+
+    # Is the copy in the profile the same file the repo ships? A stale copy from
+    # an older version is a classic "the CSS is there but nothing changed".
+    for name in UI_FILES:
+        src = CHROME_SRC_DIR / name
+        dst = chrome_dir / name
+        if src.is_file() and dst.is_file():
+            same = css_hash(src) == css_hash(dst)
+            report(same, f"chrome/{name} matches this repo", "stale - re-run the installer" if not same else "")
+
+    probe = chrome_dir / PROBE_FILE
+    if probe.is_file():
+        print(f"  [info] probe active: {probe} (run --unprobe once you have looked at the toolbar)")
+
+    saved = pref_value_from_prefs_js(profile_dir, "toolkit.legacyUserProfileCustomizations.stylesheets")
+    if saved is None:
+        print("  [info] prefs.js has no saved value yet; Firefox will take it from user.js on next start")
+    elif saved is True:
+        report(True, "pref saved as true")
+    else:
+        report(False, "pref saved as false", "set it to true in about:config, or reinstall")
+        print("         (a stale user.js or another hardening tool may have set it false)")
 
     # Catch the number-one cause: SheepFox was installed into a profile that
     # Firefox never opens (Store build, portable build, second profile, ...).
     others = [d for d in iter_profile_dirs() if d.resolve() != profile_dir.resolve()]
-    stray = [d for d in others if (d / "user.js").is_file()]
+    stray = [d for d in others if (d / "chrome" / "userChrome.css").is_file() or (d / "user.js").is_file()]
     if stray:
         print()
         print("  [WARN] Other Firefox profiles on this machine also have SheepFox files:")
@@ -310,9 +373,14 @@ def doctor(profile_dir: Path | None, firefox_dir: Path | None) -> int:
         print("  Full reinstall:  python3 scripts/install.py [--profile DIR] [--system]")
         return 1
 
-    print("  Files are in place. Quit Firefox completely, then start it again.")
-    print("  If nothing changed, the profile above is probably not the one Firefox runs:")
-    print("    open about:support in Firefox, compare 'Profile Folder' with the path")
+    print("  Files are in place. To prove Firefox is actually reading the stylesheet:")
+    print("    1. python3 scripts/install.py --probe")
+    print("    2. QUIT Firefox completely (Task Manager -> no firefox.exe), then start it.")
+    print("    3. Open a new tab. The toolbar turns RED and the pill gets a green outline")
+    print("       if the CSS is loaded. Nothing changes if it is not.")
+    print("    4. python3 scripts/install.py --unprobe")
+    print("  If the toolbar stays dark, the profile above is not the one Firefox runs:")
+    print("    open about:support in Firefox and compare 'Profile Folder' with the path")
     print("    printed at the top of this report, then reinstall with --profile <that path>.")
     return 0
 
@@ -413,9 +481,7 @@ def backup_and_write(dest: Path, content: str, dry_run: bool) -> None:
 
 
 def _uninstall_profile(profile: Path, dry_run: bool) -> None:
-    # user.js, plus the leftovers of the retired search-bar theme (<= 1.2) so an
-    # upgrade from that version really does leave a pristine profile.
-    for target in [profile / "user.js"] + [profile / "chrome" / name for name in LEGACY_UI_FILES]:
+    for target in [profile / "user.js"] + [profile / "chrome" / name for name in (*UI_FILES, PROBE_FILE)]:
         if not target.exists():
             continue
         if dry_run:
@@ -451,7 +517,7 @@ def main() -> int:
     parser.add_argument(
         "--doctor",
         action="store_true",
-        help="Diagnose why the install is not taking effect (wrong profile, stale user.js).",
+        help="Diagnose why the floating-search UI (or the install) is not taking effect.",
     )
     parser.add_argument(
         "--report",
@@ -460,13 +526,28 @@ def main() -> int:
         const=Path("sheepfox-report.txt"),
         help="Write a full diagnostic report to a file (default: ./sheepfox-report.txt).",
     )
+    parser.add_argument(
+        "--probe",
+        action="store_true",
+        help="Write chrome/sheepfox-probe.css (red toolbar) to prove userChrome.css is loading.",
+    )
+    parser.add_argument(
+        "--unprobe",
+        action="store_true",
+        help="Remove the file written by --probe.",
+    )
+    parser.add_argument(
+        "--no-ui",
+        action="store_true",
+        help="Skip the chrome/userChrome.css + userContent.css floating-search theme.",
+    )
     args = parser.parse_args()
 
     profile_dir = args.profile.resolve() if args.profile else detect_default_profile()
     firefox_dir = args.firefox_dir.resolve() if args.firefox_dir else detect_system_firefox_dir()
     # With no explicit --profile, install into EVERY profile that exists. Profile
-    # detection is the number-one reason an install silently does nothing
-    # (Store builds, portable builds, a second profile).
+    # detection is the number-one reason a userChrome theme silently does
+    # nothing (Store builds, portable builds, a second profile).
     targets = [profile_dir] if args.profile else all_profiles()
     if targets and profile_dir is None:
         profile_dir = targets[0]
@@ -514,6 +595,32 @@ def main() -> int:
     if args.doctor:
         return doctor(profile_dir, firefox_dir)
 
+    if args.probe or args.unprobe:
+        targets = [t for t in targets if t.is_dir()]
+        if not targets:
+            print("[ERROR] No profile to write the probe into. Pass --profile <dir>.", file=sys.stderr)
+            return 1
+        for target in targets:
+            probe_path = target / "chrome" / PROBE_FILE
+            if args.unprobe:
+                if probe_path.exists():
+                    if args.dry_run:
+                        print(f"  [DRY-RUN] Would remove {probe_path}")
+                    else:
+                        probe_path.unlink()
+                        print(f"  [REMOVE] Removed {probe_path}")
+                else:
+                    print(f"  [INFO]   No probe file present in {target}")
+                continue
+            backup_and_write(probe_path, PROBE_CSS, dry_run=args.dry_run)
+        if args.unprobe:
+            return 0
+        if not args.dry_run:
+            print("\n  Now QUIT Firefox completely (Task Manager -> no firefox.exe), start it and")
+            print("  open a new tab: a RED toolbar + green pill outline means the CSS is loading.")
+            print("  Remove it with:  python3 scripts/install.py --unprobe")
+        return 0
+
     if args.uninstall:
         for target_profile in [t for t in targets if t.is_dir()]:
             _uninstall_profile(target_profile, args.dry_run)
@@ -546,16 +653,16 @@ def main() -> int:
         if len(targets) > 1:
             print(f"\n  -> {target}")
         backup_and_write(target / "user.js", payload, dry_run=args.dry_run)
-        # A profile upgraded from <= 1.2 still carries the retired theme. Leaving
-        # it behind would be a stylesheet nothing maintains any more.
-        for name in LEGACY_UI_FILES:
-            stale = target / "chrome" / name
-            if stale.is_file():
-                if args.dry_run:
-                    print(f"  [DRY-RUN] Would remove retired theme file {stale}")
-                else:
-                    stale.unlink()
-                    print(f"  [REMOVE] Removed retired theme file {stale}")
+
+        if args.no_ui:
+            print("  [SKIP]   UI theme skipped (--no-ui)")
+            continue
+        for name in UI_FILES:
+            src = CHROME_SRC_DIR / name
+            if not src.is_file():
+                print(f"  [WARN]   Missing UI asset: {src}")
+                continue
+            backup_and_write(target / "chrome" / name, src.read_text(encoding="utf-8"), args.dry_run)
 
     if args.system:
         if not firefox_dir:

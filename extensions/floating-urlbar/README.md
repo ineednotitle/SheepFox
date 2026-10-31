@@ -21,12 +21,14 @@ in one list; a URL you type is the first row.
 ## What it can and cannot do
 
 **An extension cannot style Firefox's address bar.** WebExtensions get no access
-to the browser chrome (`#urlbar`, `#nav-bar`), so there is no way for an add-on
-to detach Mozilla's own bar and float it. Profile CSS (`userChrome.css`) is the
-only mechanism that can do that — and the reason this extension exists is that
-SheepFox no longer ships profile CSS.
+to the browser chrome (`#urlbar`, `#nav-bar`), so no add-on can detach Mozilla's
+own bar and float it — that is what SheepFox's `config/chrome/userChrome.css`
+does, and it is on by default.
 
-So the bar is implemented the two ways a WebExtension actually can:
+This extension exists for the case where profile CSS is unavailable or unwanted
+(a locked-down machine, a profile you would rather not modify, or a floating bar
+that also works on `about:` pages). It cannot float the real bar, so it ships its
+own surface, in the two ways a WebExtension actually can:
 
 | Surface | When | How it looks |
 | :--- | :--- | :--- |

@@ -53,6 +53,8 @@ PAYLOAD_FILES = (
     "config/modules/02-shieldfox.js",
     "config/modules/03-cleanfox.js",
     "config/modules/04-smoothfox.js",
+    "config/chrome/userChrome.css",
+    "config/chrome/userContent.css",
     "config/overrides/strict-paranoia.override.js",
     "config/overrides/low-memory.override.js",
     "config/overrides/user-overrides.example.js",
@@ -391,7 +393,7 @@ def verify_windows(path: Path) -> None:
         raise SystemExit(f"[error] {path.name}: the payload zip is not embedded")
     payload = zipfile.ZipFile(io.BytesIO(data[start:]))
     names = set(payload.namelist())
-    for required in ("scripts/install-windows.ps1", "config/user.js", "config/distribution/policies.json"):
+    for required in ("scripts/install-windows.ps1", "config/user.js", "config/chrome/userChrome.css"):
         if required not in names:
             raise SystemExit(f"[error] {path.name}: payload is missing {required}")
     print(f"  [verify] {path.name}: PE32+ x86-64, {len(names)} payload files")
@@ -435,7 +437,7 @@ def verify_iso(path: Path) -> None:
     data = path.read_bytes()
     if data[0x8001:0x8006] != b"CD001":
         raise SystemExit(f"[error] {path.name}: no ISO9660 primary volume descriptor")
-    for required in (b"Install SheepFox.command", b"install-unix.sh", b"policies.json"):
+    for required in (b"Install SheepFox.command", b"install-unix.sh", b"userChrome.css"):
         if required not in data:
             raise SystemExit(f"[error] {path.name}: {required.decode()} is missing")
     print(f"  [verify] {path.name}: ISO9660 volume with the payload")

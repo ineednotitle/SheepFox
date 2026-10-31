@@ -163,6 +163,11 @@ jobs:
           body: |
             Drop-in installers for (SheepFox) Firefox.
 
+            The install writes `user.js` plus **`chrome/userChrome.css`** into every Firefox
+            profile it finds: that is the floating Zen/Arc-style search bar on `Ctrl+T` /
+            `Ctrl+L`, and it is the only mechanism that can float Firefox's *own* address
+            bar. `-NoUI` / `--no-ui` installs everything except that theme.
+
             Both installers **preinstall uBlock Origin and Decentraleyes** through the
             SheepShields policy (`distribution/policies.json`), and ask for administrator
             rights once because that file lives next to the Firefox binary. Use
@@ -172,14 +177,14 @@ jobs:
             * **Windows** — `SheepFox-Setup-<version>.exe`. Double-click it. It unpacks
               the payload to `%TEMP%\sheepfox-setup` and runs the same
               `scripts\install-windows.ps1` a git checkout would run, so `-ProfileOnly`,
-              `-NoExtensions`, `-System`, `-Strict`, `-LowMemory`, `-Uninstall`,
+              `-NoExtensions`, `-System`, `-Strict`, `-LowMemory`, `-NoUI`, `-Uninstall`,
               `-DryRun`, `-Report` and `-Doctor` all work.
               `SheepFox-Setup.exe /?` lists them.
             * **macOS** — `SheepFox-<version>.dmg`. Open it, then double-click
               **Install SheepFox.command**. Gatekeeper may need
               *System Settings -> Privacy & Security -> Open Anyway* for an unsigned
-              build; the same `--profile / --no-extensions / --strict / --uninstall /
-              --low-memory / --dry-run / --doctor / --report` switches apply.
+              build; the same `--profile / --no-extensions / --strict / --no-ui /
+              --uninstall / --low-memory / --dry-run / --doctor / --report` switches apply.
             * **Fallback** — `SheepFox-<version>.iso`. Identical contents for hosts
               that will not mount the UDIF image.
 
