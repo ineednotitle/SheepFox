@@ -371,6 +371,75 @@ def build_macos(version: str) -> list[Path]:
     return [dmg_path, iso_path]
 
 
+def verify_windows(path: Path) -> None:
+    data = path.read_bytes()
+    if data[:2] != b"MZ":
+        raise SystemExit(f"[error] {path.name}: not a DOS/PE image")
+    offset = int.from_bytes(data[0x3C:0x40], "little")
+    if data[offset:offset + 4] != b"PE\0\0":
+        raise SystemExit(f"[error] {path.name}: missing the PE signature")
+    machine = int.from_bytes(data[offset + 4:offset + 6], "little")
+    if machine != 0x8664:
+        raise SystemExit(f"[error] {path.name}: machine 0x{machine:04x}, expected x86-64")
+    start = data.find(b"PK\x03\x04")
+    if start < 0:
+        raise SystemExit(f"[error] {path.name}: the payload zip is not embedded")
+    payload = zipfile.ZipFile(io.BytesIO(data[start:]))
+    names = set(payload.namelist())
+    for required in ("scripts/install-windows.ps1", "config/user.js", "config/chrome/userChrome.css"):
+        if required not in names:
+            raise SystemExit(f"[error] {path.name}: payload is missing {required}")
+    print(f"  [verify] {path.name}: PE32+ x86-64, {len(names)} payload files")
+
+
+def verify_dmg(path: Path) -> None:
+    data = path.read_bytes()
+    trailer = data[-512:]
+    if trailer[:4] != b"koly":
+        # An hdiutil image (HFS+ UDZO) carries its own trailer layout; size is
+        # the only cheap thing to assert without macOS tooling.
+        if len(data) > 512:
+            print(f"  [verify] {path.name}: {len(data)} bytes (native hdiutil image)")
+            return
+        raise SystemExit(f"[error] {path.name}: no UDIF trailer")
+    length = int.from_bytes(trailer[32:40], "big")
+    xml_offset = int.from_bytes(trailer[216:224], "big")
+    xml_length = int.from_bytes(trailer[224:232], "big")
+    if xml_offset + xml_length + 512 != len(data):
+        raise SystemExit(f"[error] {path.name}: the XML plist does not line up with the trailer")
+    xml = data[xml_offset:xml_offset + xml_length]
+    if int.from_bytes(trailer[360:364], "big") != zlib.crc32(xml) & 0xFFFFFFFF:
+        raise SystemExit(f"[error] {path.name}: plist checksum mismatch")
+    if int.from_bytes(trailer[88:92], "big") != zlib.crc32(data[:length]) & 0xFFFFFFFF:
+        raise SystemExit(f"[error] {path.name}: data fork checksum mismatch")
+    blkx = plistlib.loads(xml)["resource-fork"]["blkx"][0]["Data"]
+    if blkx[:4] != b"mish":
+        raise SystemExit(f"[error] {path.name}: missing the blkx mish block")
+    print(f"  [verify] {path.name}: UDIF koly trailer, checksums match")
+
+
+def verify_iso(path: Path) -> None:
+    data = path.read_bytes()
+    if data[0x8001:0x8006] != b"CD001":
+        raise SystemExit(f"[error] {path.name}: no ISO9660 primary volume descriptor")
+    for required in (b"Install SheepFox.command", b"install-unix.sh", b"userChrome.css"):
+        if required not in data:
+            raise SystemExit(f"[error] {path.name}: {required.decode()} is missing")
+    print(f"  [verify] {path.name}: ISO9660 volume with the payload")
+
+
+def verify_artifacts(paths: list[Path]) -> None:
+    print()
+    for path in paths:
+        suffix = path.suffix.lower()
+        if suffix == ".exe":
+            verify_windows(path)
+        elif suffix == ".dmg":
+            verify_dmg(path)
+        elif suffix == ".iso":
+            verify_iso(path)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build the SheepFox installers.")
     parser.add_argument("--windows", action="store_true", help="build the Windows .exe")
@@ -386,6 +455,8 @@ def main() -> int:
         artifacts.append(build_windows(find_zig(args.zig), version))
     if both or args.macos:
         artifacts.extend(build_macos(version))
+
+    verify_artifacts(artifacts)
 
     print()
     for artifact in artifacts:

@@ -36,20 +36,9 @@ jobs:
         shell: bash
         run: python mozbuild/scripts/build-installers.py --windows
 
-      - name: Smoke-test the embedded payload
+      - name: Verify the built executable
         shell: bash
-        run: |
-          python - <<'PY'
-          import io, pathlib, zipfile
-
-          exe = next(pathlib.Path("dist").glob("SheepFox-Setup-*.exe")).read_bytes()
-          assert exe[:2] == b"MZ", "not a PE file"
-          payload = zipfile.ZipFile(io.BytesIO(exe[exe.find(b"PK\x03\x04"):]))
-          names = payload.namelist()
-          for required in ("scripts/install-windows.ps1", "config/user.js", "config/chrome/userChrome.css"):
-              assert required in names, f"payload is missing {required}"
-          print(f"payload ok: {len(names)} files")
-          PY
+        run: python mozbuild/scripts/build-installers.py --windows
 
       - name: Upload the installer
         uses: actions/upload-artifact@v4
