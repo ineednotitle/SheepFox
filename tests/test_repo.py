@@ -284,7 +284,12 @@ class TestFloatingSearchUI(unittest.TestCase):
                 text.count("{"), text.count("}"), msg=f"{path.name}: unbalanced braces"
             )
             self.assertTrue(text.lstrip().startswith("/*"), msg=f"{path.name}: needs a header")
-        self.assertIn("@namespace", read(self.CHROME), msg="userChrome.css needs the XUL namespace")
+        # A default @namespace makes `*#urlbar` match only that namespace, and
+        # #urlbar has been an HTML element since Firefox 140 - so declaring one
+        # silently disables the whole theme. See the header of userChrome.css.
+        self.assertNotRegex(
+            read(self.CHROME), r"(?m)^\s*@namespace", msg="a default @namespace breaks #urlbar"
+        )
         self.assertIn("@-moz-document", read(self.CONTENT), msg="userContent.css needs a scope")
 
     def test_style_legacy_sheets_is_enabled(self) -> None:
@@ -305,18 +310,22 @@ class TestFloatingSearchUI(unittest.TestCase):
         shell = self.shell
         # Trigger 1: a new/blank tab (nothing loaded to show).
         self.assertIn('#urlbar[pageproxystate="invalid"]', shell)
-        # Trigger 2: the bar is open over any tab - this is what Zen itself
-        # gates on, and the state Firefox actually lays out itself.
+        # Trigger 2: the megabar breakout state (Firefox ~72-151) - what Zen's
+        # own theme gates on, and the state Firefox lays out itself.
         self.assertIn("#urlbar[breakout][breakout-extend]", shell)
+        # Triggers 3 and 4: the state SmartbarInput sets on 152+ and the plain
+        # "results view is open" state, so one file covers every version.
+        self.assertIn("#urlbar[expanded]", shell)
+        self.assertIn("#urlbar[open]", shell)
         self.assertIn("position: fixed", shell, msg="the pill must leave the toolbar")
         # Firefox sets top/left/width on the breakout state, so those five
         # properties need !important or the bar snaps back into the toolbar.
-        for prop in ("top:", "left:", "width:", "margin-left:", "position:"):
+        for prop in ("top:", "left:", "width:", "position:"):
             self.assertIn(f"{prop}", shell)
         self.assertIn("!important", shell)
-        # Centre with left + a negative inline margin. A transform here fights
-        # the animation Firefox runs when the bar leaves the toolbar.
-        self.assertIn("margin-left: calc(var(--sheepfox-pill-width) / -2)", shell)
+        # Centre with `translate`, never `transform`: Firefox animates the bar
+        # with transforms of its own and the two fight. This is Zen's approach.
+        self.assertIn("translate: -50% 0", shell)
         self.assertNotRegex(shell, r"(?m)^\s*transform:", msg="never transform the pill into place")
         self.assertIn("border-radius: var(--sheepfox-pill-radius)", shell)
         self.assertIn("box-shadow", shell)
@@ -337,7 +346,8 @@ class TestFloatingSearchUI(unittest.TestCase):
         # Collapsed state is locked to 56px so the auto-opened dropdown cannot
         # balloon it; the open state may grow again, capped.
         self.assertIn("max-height: var(--sheepfox-pill-height)", css)
-        self.assertIn("#urlbar[breakout][breakout-extend],\n#urlbar[pageproxystate=\"invalid\"][breakout-extend] {", css)
+        grown = css.split("#urlbar[open],\n#urlbar[pageproxystate=\"invalid\"][breakout-extend] {", 1)
+        self.assertEqual(len(grown), 2, msg="the open state must unclamp the height")
         self.assertIn("max-height: 62vh", css)
 
     def test_empty_new_tab_collapses_the_suggestions_panel(self) -> None:
@@ -349,17 +359,28 @@ class TestFloatingSearchUI(unittest.TestCase):
         self.assertIn("display: none", hidden)
         # The dock-while-typing opt-out ships commented out, so the default stays
         # the Zen/Arc behaviour.
-        self.assertIn("/*\n#urlbar[breakout][breakout-extend] {", css)
+        self.assertIn("/*\n#urlbar[open],", css)
         self.assertIn("position: relative !important;", css)
         # Zen's dimming backdrop ships commented out too.
-        self.assertIn("#urlbar[breakout][breakout-extend]::after", css)
+        self.assertIn("#urlbar[open]::after", css)
         self.assertIn("backdrop-filter: blur(5px)", css)
+
+    def test_proof_of_load_badge(self) -> None:
+        """A visible marker drawn by userChrome.css itself."""
+        css = read(self.CHROME)
+        self.assertIn('#nav-bar::after', css)
+        self.assertIn('content: "SheepFox UI"', css)
+        self.assertIn("pointer-events: none", css)
+        # It must not steal clicks or sit above the pill.
+        badge = css.split("#nav-bar::after", 1)[1].split("}", 1)[0]
+        self.assertIn("position: fixed", badge)
 
     def test_stylesheet_imports_the_probe(self) -> None:
         css = read(self.CHROME)
         self.assertIn('@import url("sheepfox-probe.css");', css)
-        # @import must precede @namespace or the rule is dropped.
-        self.assertLess(css.index("@import"), css.index("@namespace"))
+        # @import must come before any rule other than @charset/@layer.
+        body = css[css.index("*/") :]  # skip the header comment
+        self.assertLess(body.index("@import"), body.index(":root {"))
 
     def test_installers_can_write_and_remove_the_probe(self) -> None:
         installer = read(REPO_ROOT / "scripts" / "install.py")

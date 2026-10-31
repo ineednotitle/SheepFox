@@ -10,34 +10,36 @@
    Installed to: <profile>/chrome/userChrome.css
    Revert:       delete this file, or run the installer with --no-ui.
 
-   BASED ON
-   Zen Browser's own floating-urlbar theme (zen-browser/theme-components,
-   floating-urlbar/userChrome.css). The parts that matter and that earlier
-   SheepFox builds got wrong:
+   =========================================================================
+   DO NOT ADD `@namespace url("...there.is.only.xul")` TO THIS FILE.
+   Nearly every floating-urlbar snippet on the internet starts with it. It is
+   the reason earlier SheepFox builds did nothing at all:
 
-     * position: fixed on the BREAKOUT state. Firefox lays the open address bar
-       out itself with `#urlbar[breakout][breakout-extend] { position: absolute;
-       top: ...; left: ...; width: ... }`; without !important on those five
-       properties the bar simply stays where the toolbar put it.
+     * `@namespace url(...)` without a prefix sets the DEFAULT namespace, and a
+       default namespace applies to type selectors *and to the universal
+       selector*. `#urlbar` is `*#urlbar`, so it only matches elements in that
+       namespace.
+     * Firefox used to build the bar as `<hbox id="urlbar">` (XUL). Since
+       Firefox 140 it is plain HTML — `<html:div id="urlbar">`, and since 152
+       `<html:moz-urlbar id="urlbar">`. An XUL default namespace therefore stops
+       `#urlbar` (and every rule hanging off it) from matching, silently, with
+       no console error.
+     * `#nav-bar` and `#navigator-toolbox` are still XUL, so a `#nav-bar`
+       snippet like the --probe still "works" - which is exactly why the probe
+       looked healthy while the pill never appeared.
 
-     * centre with left/inline margins, never `transform`. Firefox drives
-       transforms on the bar while it animates out of the toolbar, so a
-       transform here is a coin flip.
+   Every selector here is id/attribute/class based, so no namespace is needed.
+   =========================================================================
 
-     * both trigger states. [pageproxystate="invalid"] is a blank/new tab (bar
-       not showing a loaded page); [breakout][breakout-extend] is the bar open
-       over any tab. Zen uses the second, SheepFox needs the first so the pill
-       is already floating on a brand-new tab.
-
-   DIAGNOSTIC
-   The @import below loads sheepfox-probe.css. That file does not exist unless
-   you run the installer with --probe, in which case the toolbar turns red —
-   a one-glance proof that Firefox is reading this stylesheet at all.
+   HOW THE OPEN STATE IS DETECTED, BY FIREFOX VERSION
+     [pageproxystate="invalid"]      every version - blank/new tab, nothing loaded
+     [breakout][breakout-extend]     the megabar breakout state, Firefox ~72-151
+     [expanded]                      the state SmartbarInput.mjs sets (152+)
+     [open]                          the results view is open over any page
+   All four are listed so one file works on every supported Firefox.
    ============================================================================ */
 
 @import url("sheepfox-probe.css");
-
-@namespace url("http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul");
 
 /* --- Tokens: one place to tune the pill ------------------------------------ */
 :root {
@@ -84,27 +86,25 @@
 
 /* ----------------------------------------------------------------------------
    1. THE PILL SHELL
-   Two triggers, one shell:
-     [pageproxystate="invalid"]     a blank/new tab (nothing loaded to show)
-     [breakout][breakout-extend]    the bar is open over any tab (Zen's state)
    ------------------------------------------------------------------------- */
 #urlbar[pageproxystate="invalid"],
 #urlbar[breakout][breakout-extend],
-#urlbar[breakout][usertyping][focused] {
+#urlbar[expanded],
+#urlbar[open] {
   position: fixed !important;
   /* Centre the 56px pill on --sheepfox-pill-top but anchor its TOP edge, so an
      open suggestion list grows downwards instead of dragging the field up. */
   top: calc(var(--sheepfox-pill-top) - var(--sheepfox-pill-height) / 2) !important;
   bottom: auto !important;
-  /* Centre horizontally with left + a negative inline margin. No transform:
-     Firefox animates the bar with its own transforms. */
+  /* Centred with `translate`, not `transform`: Firefox animates the bar with
+     transforms of its own, and the two would fight. This is what Zen uses. */
   left: 50% !important;
+  translate: -50% 0 !important;
   right: auto !important;
   width: var(--sheepfox-pill-width) !important;
   min-width: var(--sheepfox-pill-width) !important;
   max-width: var(--sheepfox-pill-width) !important;
-  margin-left: calc(var(--sheepfox-pill-width) / -2) !important;
-  margin-block: 0 !important;
+  margin: 0 !important;
   height: var(--sheepfox-pill-height) !important;
   min-height: var(--sheepfox-pill-height) !important;
   max-height: var(--sheepfox-pill-height) !important;
@@ -122,13 +122,17 @@
 /* Once the suggestions open, let the pill grow downwards — capped so it can
    never run off the bottom of the window. */
 #urlbar[breakout][breakout-extend],
+#urlbar[expanded],
+#urlbar[open],
 #urlbar[pageproxystate="invalid"][breakout-extend] {
   height: auto !important;
   max-height: 62vh !important;
 }
 
-/* Firefox paints the bar's surface on #urlbar-background, not #urlbar, so the
-   fill/border/radius must be applied there too. */
+/* Firefox paints the bar's surface on #urlbar-background (a XUL <hbox> up to
+   Firefox ~151, gone in the moz-urlbar rewrite), so the fill/border/radius are
+   applied there too when it exists, and on #urlbar itself always. */
+#urlbar #urlbar-background,
 #urlbar[pageproxystate="invalid"] #urlbar-background,
 #urlbar[breakout][breakout-extend] #urlbar-background {
   height: 100% !important;
@@ -152,8 +156,7 @@
 }
 
 /* Geometry for the suggestion list while it is open. */
-#urlbar[pageproxystate="invalid"] #urlbar-results,
-#urlbar[breakout][breakout-extend] #urlbar-results {
+#urlbar #urlbar-results {
   margin: 8px 0 10px !important;
 }
 
@@ -165,8 +168,7 @@
 /* ----------------------------------------------------------------------------
    3. INNER LAYOUT
    ------------------------------------------------------------------------- */
-#urlbar[pageproxystate="invalid"] .urlbar-input-container,
-#urlbar[breakout][breakout-extend] .urlbar-input-container {
+#urlbar .urlbar-input-container {
   height: var(--sheepfox-pill-height) !important;
   padding-inline: 22px 18px !important;
   border: none !important;
@@ -174,21 +176,21 @@
   align-items: center !important;
 }
 
-#urlbar[pageproxystate="invalid"] #urlbar-input,
-#urlbar[breakout][breakout-extend] #urlbar-input {
+#urlbar #urlbar-input {
   font-size: 16px !important;
   text-align: center !important;
   color: var(--sheepfox-pill-text) !important;
 }
 
-#urlbar[pageproxystate="invalid"] #urlbar-input::placeholder,
-#urlbar[breakout][breakout-extend] #urlbar-input::placeholder {
+#urlbar #urlbar-input::placeholder {
   text-align: center !important;
   opacity: 0.72 !important;
 }
 
-/* Keep the pill clean on a blank tab: no shield, no page-action clutter. */
+/* Keep the pill clean on a blank tab: no shield, no page-action clutter.
+   (Firefox 152+ renamed the identity box to #trust-icon-container.) */
 #urlbar[pageproxystate="invalid"] #identity-box,
+#urlbar[pageproxystate="invalid"] #trust-icon-container,
 #urlbar[pageproxystate="invalid"] #page-action-buttons,
 #urlbar[pageproxystate="invalid"] .urlbar-go-button,
 #urlbar[pageproxystate="invalid"] .urlbar-icon-wrapper {
@@ -197,7 +199,8 @@
 
 /* Subtle lift on hover — a hint that it is one big target. */
 #urlbar[pageproxystate="invalid"]:hover,
-#urlbar[breakout][breakout-extend]:hover {
+#urlbar[breakout][breakout-extend]:hover,
+#urlbar[open]:hover {
   box-shadow: var(--sheepfox-pill-shadow-hover) !important;
 }
 
@@ -210,12 +213,33 @@
 }
 
 /* ----------------------------------------------------------------------------
-   4. OPT-IN — Zen's dimmed backdrop behind the floating bar
-   A blurred, darkened overlay over the page while the bar is open. Very close
-   to Zen; off by default because it is a full-window effect.
+   4. PROOF-OF-LOAD BADGE
+   A tiny label in the corner of the window, drawn by this stylesheet. If you can
+   read "SheepFox UI", this file is being parsed and applied — so anything else
+   that looks wrong is a selector, not an install. Remove this whole block (or
+   run the installer with --no-ui) to get rid of it.
+   ------------------------------------------------------------------------- */
+#nav-bar::after {
+  content: "SheepFox UI" !important;
+  position: fixed !important;
+  right: 10px !important;
+  bottom: 8px !important;
+  padding: 3px 8px !important;
+  font: 10px/1.4 system-ui, sans-serif !important;
+  color: var(--sheepfox-pill-text) !important;
+  background: var(--sheepfox-pill-bg) !important;
+  border: 1px solid var(--sheepfox-pill-border) !important;
+  border-radius: 999px !important;
+  opacity: 0.55 !important;
+  pointer-events: none !important;
+  z-index: 99999 !important;
+}
+
+/* ----------------------------------------------------------------------------
+   5. OPT-IN — Zen's dimmed backdrop behind the floating bar
    ------------------------------------------------------------------------- */
 /*
-#urlbar[breakout][breakout-extend]::after {
+#urlbar[open]::after {
   content: "" !important;
   position: fixed !important;
   pointer-events: none !important;
@@ -227,16 +251,18 @@
 */
 
 /* ----------------------------------------------------------------------------
-   5. OPT-OUT — "dock while typing"
+   6. OPT-OUT — "dock while typing"
    Uncomment if you prefer the bar to snap back into the toolbar as soon as you
    start typing instead of staying centred with the results open under it.
    ------------------------------------------------------------------------- */
 /*
-#urlbar[breakout][breakout-extend] {
+#urlbar[open],
+#urlbar[breakout][breakout-extend],
+#urlbar[expanded] {
   position: relative !important;
   top: auto !important;
   left: auto !important;
-  margin-left: 0 !important;
+  translate: none !important;
   width: auto !important;
   min-width: 0 !important;
   max-width: none !important;
@@ -246,7 +272,7 @@
 */
 
 /* ----------------------------------------------------------------------------
-   6. POLISH
+   7. POLISH
    ------------------------------------------------------------------------- */
 /* Keep the bar on its own compositor layer so the transition stays smooth on
    120Hz/144Hz/240Hz panels instead of re-rasterising the toolbar. */
@@ -258,7 +284,7 @@
 @media (prefers-reduced-motion: reduce) {
   #urlbar,
   #urlbar[pageproxystate="invalid"],
-  #urlbar[breakout][breakout-extend] {
+  #urlbar[open] {
     transition: none !important;
   }
 }

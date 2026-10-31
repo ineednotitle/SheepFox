@@ -184,10 +184,26 @@ you type, the list opens **underneath** the pill (Arc/Zen behaviour) and the pil
 load the page and it docks back into the stock toolbar with normal autocomplete.
 
 The implementation follows Zen Browser's own `floating-urlbar` theme: `position: fixed` with
-`!important` on the properties Firefox otherwise sets itself (`top`, `left`, `width`), centring done
-with `left: 50%` plus a negative inline margin rather than a transform — Firefox animates the bar
-with transforms of its own — and two trigger states (`[pageproxystate="invalid"]` for a fresh tab,
-`[breakout][breakout-extend]` for an open bar, which is what Zen gates on).
+`!important` on the properties Firefox otherwise sets itself (`top`, `left`, `width`), and centring
+done with `left: 50%` + `translate: -50% 0` rather than `transform` — Firefox animates the bar with
+transforms of its own, and the two fight.
+
+**No `@namespace`.** Almost every floating-urlbar snippet on the internet opens with
+`@namespace url("...there.is.only.xul")`. That sets the *default* namespace, which applies to type
+selectors **and the universal selector** — and `#urlbar` is `*#urlbar`. Firefox built the bar as
+`<hbox id="urlbar">` (XUL) until ~135, but since 140 it is a plain HTML element
+(`<html:div id="urlbar">`, `<html:moz-urlbar id="urlbar">` since 152). With that boilerplate in
+place, every `#urlbar` rule silently matches nothing, with no console error — while `#nav-bar`
+snips keep working because the toolbar is still XUL. That is why SheepFox's earlier builds looked
+"installed but dead". Every selector here is id/attribute/class based, so no namespace is declared.
+
+The open state is detected four ways so one file covers every Firefox: `[pageproxystate="invalid"]`
+(blank tab, all versions), `[breakout][breakout-extend]` (the megabar breakout, ~72–151),
+`[expanded]` (what `SmartbarInput.mjs` sets on 152+) and `[open]` (results view open over a page).
+
+A small **"SheepFox UI" badge** is drawn in the corner of the window by this stylesheet. It is
+deliberate: if you can read it, `userChrome.css` is parsed and applied, so anything still wrong is a
+selector rather than an install. Delete the `PROOF-OF-LOAD BADGE` block to remove it.
 
 The installer now writes to **every Firefox profile on the machine** (standard, Microsoft Store and
 portable roots, read from `installs.ini` first) — landing in the wrong profile is the classic reason
@@ -374,7 +390,8 @@ python3 scripts/install.py --report report.txt
 | New Tab logo changed but no pill | older Firefox without `:has()` support (< 121) | upgrade, or use the `.default`-profile rules only |
 | Windows Store Firefox | profile lives under `%LOCALAPPDATA%\Packages\Mozilla.Firefox_*` | handled automatically now; `-Doctor` prints the profile it uses (override with `-ProfilePath`) |
 | Doctor flags "stale" | profile has an older copy of the CSS | re-run the installer, then restart Firefox |
-| Need proof CSS loads at all | `userChrome.css` may not be read | `.\scripts\install-windows.bat -Probe` → red toolbar ⇒ CSS loads; no colour ⇒ wrong profile or pref off. Remove with `-Unprobe` |
+| Need proof CSS loads at all | `userChrome.css` may not be read | look for the **"SheepFox UI"** badge in the corner, or run `.\scripts\install-windows.bat -Probe` → red toolbar ⇒ CSS loads. Remove with `-Unprobe` |
+| Copied a floating-urlbar snippet, nothing happens | a default `@namespace ...xul` kills every `#urlbar` rule (the bar is HTML since Firefox 140) | delete the `@namespace` line — SheepFox's own sheet has none |
 
 Prove *where* your profile is:
 
