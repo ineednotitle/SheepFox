@@ -618,7 +618,9 @@ def main() -> int:
     if args.uninstall:
         for target_profile in [t for t in targets if t.is_dir()]:
             _uninstall_profile(target_profile, args.dry_run)
-        if args.system and firefox_dir:
+        # Mirrors the install rule: a plain run wrote the policy, so a plain
+        # --uninstall has to remove it again.
+        if (args.system or not args.profile) and firefox_dir:
             for rel in ["sheepfox.cfg", "defaults/pref/local-settings.js", "distribution/policies.json"]:
                 target = firefox_dir / rel
                 if target.exists():

@@ -109,7 +109,7 @@ SheepFox/
 │   └── macos/                       # "Install SheepFox.command" + README.txt
 │
 ├── scripts/                         # install.py, install-unix.sh, install-windows.{bat,ps1}
-├── tests/test_repo.py               # 77 tests, stdlib only
+├── tests/test_repo.py               # 90 tests, stdlib only
 └── .github/workflows/               # validate-configs.yml, build-sheepfox.yml,
                                      #   release-installers.yml
 ```

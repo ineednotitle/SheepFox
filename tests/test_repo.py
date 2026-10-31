@@ -661,6 +661,38 @@ class TestExtensionPreinstall(unittest.TestCase):
             self.assertIn("extension preinstall skipped for: uBlock Origin, Decentraleyes", result.stdout)
             self.assertNotIn("[FAIL]", result.stdout)
 
+    def test_plain_uninstall_removes_the_policy(self) -> None:
+        """Whatever a plain run installs, a plain --uninstall has to remove."""
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            profile = home / ".mozilla" / "firefox" / "abc.default-release"
+            profile.mkdir(parents=True)
+            (home / ".mozilla" / "firefox" / "profiles.ini").write_text(
+                "[Profile0]\nName=default-release\nIsRelative=1\nPath=abc.default-release\nDefault=1\n",
+                encoding="utf-8",
+            )
+            firefox_dir = Path(tmp) / "firefox"
+            firefox_dir.mkdir()
+            environment = dict(os.environ, HOME=str(home))
+            subprocess.run(
+                [sys.executable, str(self.INSTALLER), "--firefox-dir", str(firefox_dir)],
+                capture_output=True,
+                check=True,
+                env=environment,
+            )
+            policy = firefox_dir / "distribution" / "policies.json"
+            self.assertTrue(policy.is_file())
+            result = subprocess.run(
+                [sys.executable, str(self.INSTALLER), "--firefox-dir", str(firefox_dir), "--uninstall"],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=environment,
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+            self.assertFalse(policy.exists(), msg="the policy survived --uninstall")
+            self.assertFalse((profile / "user.js").exists())
+
     def test_windows_installer_defaults_to_the_policy(self) -> None:
         ps1 = read(REPO_ROOT / "scripts" / "install-windows.ps1")
         self.assertIn("[switch]$ProfileOnly", ps1)
