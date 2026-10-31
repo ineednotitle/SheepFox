@@ -36,13 +36,9 @@
   smaller caches). Disables Fission site isolation - see the file header.
 
 .PARAMETER Doctor
-  Diagnose an existing install: report the profile in use, whether user.js and
-  chrome\userChrome.css are in the right place, and whether the stylesheet pref
-  is actually saved. Writes nothing.
-
-.PARAMETER NoUI
-  Skip the chrome\userChrome.css + userContent.css floating-search theme, so
-  Firefox keeps its stock toolbar and New Tab layout.
+  Diagnose an existing install: report the profile in use, whether user.js is in
+  the right place and carries the SheepFox prefs, and whether the policy is
+  installed. Writes nothing.
 
 .PARAMETER DryRun
   Print every action without touching the disk.
@@ -52,13 +48,6 @@
 
 .PARAMETER FirefoxDir
   Explicit Firefox installation directory (default: auto-detected).
-
-.PARAMETER Probe
-  Write chrome\sheepfox-probe.css, which turns the toolbar red. Start Firefox,
-  open a new tab: red toolbar = the stylesheet is loaded. Remove with -Unprobe.
-
-.PARAMETER Unprobe
-  Delete the file written by -Probe.
 
 .PARAMETER Report
   Run the doctor and write the whole transcript to sheepfox-report.txt in the
@@ -82,11 +71,8 @@ param(
     [switch]$Strict,
     [switch]$Uninstall,
     [switch]$DryRun,
-    [switch]$NoUI,
     [switch]$Doctor,
     [switch]$LowMemory,
-    [switch]$Probe,
-    [switch]$Unprobe,
     [switch]$Report,
     [string]$ProfilePath = "",
     [string]$FirefoxDir = "",
@@ -116,7 +102,7 @@ if ($RemainingArguments -and $RemainingArguments.Count -gt 0) {
 
 # A normal install includes the SheepShields policy: that is what preinstalls
 # uBlock Origin and Decentraleyes. -ProfileOnly opts out (and needs no UAC).
-if (-not ($ProfileOnly -or $Doctor -or $DryRun -or $Probe -or $Unprobe -or $Report)) {
+if (-not ($ProfileOnly -or $Doctor -or $DryRun -or $Report)) {
     $System = $true
 }
 
@@ -309,7 +295,6 @@ if ($System -and -not (Test-IsAdmin) -and -not $DryRun -and -not $Doctor) {
         "-System"
     )
     if ($Strict) { $argumentList += "-Strict" }
-    if ($NoUI) { $argumentList += "-NoUI" }
     if ($LowMemory) { $argumentList += "-LowMemory" }
     if ($Uninstall) { $argumentList += "-Uninstall" }
     if ($NoExtensions) { $argumentList += "-NoExtensions" }
@@ -336,11 +321,10 @@ $UserOverridesSrc = Join-Path $RepoRoot "config\overrides\user-overrides.js"
 $PoliciesSrc = Join-Path $RepoRoot "config\distribution\policies.json"
 $AutoCfgSrc = Join-Path $RepoRoot "config\autoconfig\sheepfox.cfg"
 $LocalSettingsSrc = Join-Path $RepoRoot "config\autoconfig\defaults\pref\local-settings.js"
-$ChromeSrcDir = Join-Path $RepoRoot "config\chrome"
-# Profile-level CSS: the floating Zen/Arc-style new-tab search pill.
-$UiFiles = @("userChrome.css", "userContent.css")
-# Optional probe that userChrome.css @imports; proves the stylesheet is read.
-$ProbeFile = "sheepfox-probe.css"
+# Files SheepFox <= 1.2 wrote into the profile's chrome\ folder for the
+# floating-search theme. That theme is gone; install and uninstall both clean
+# up the leftovers so an upgrade from 1.2 does not leave a dead stylesheet.
+$LegacyUiFiles = @("userChrome.css", "userContent.css", "sheepfox-probe.css")
 
 if (-not (Test-Path $UserJsSrc)) {
     Write-SheepFox "[error] config\user.js is missing. Run 'python mozbuild\scripts\build-configs.py' first." "Red"
@@ -363,52 +347,6 @@ if (-not $FirefoxDir) {
 Write-SheepFox ("Profile : " + $(if ($ProfilePath) { $ProfilePath } else { "not found (pass -ProfilePath)" }))
 Write-SheepFox ("Install : " + $(if ($FirefoxDir) { $FirefoxDir } else { "not found (pass -FirefoxDir)" }))
 Write-Host ""
-
-# --------------------------------------------------------------------------
-# Probe / unprobe (proves userChrome.css is being read)
-# --------------------------------------------------------------------------
-if ($Probe -or $Unprobe) {
-    if (-not $ProfilePath -or -not (Test-Path $ProfilePath)) {
-        Write-SheepFox "[error] No Firefox profile to write into. Pass -ProfilePath <dir>." "Red"
-        exit 1
-    }
-    $probePath = Join-Path $ProfilePath "chrome\$ProbeFile"
-    if ($Unprobe) {
-        if (Test-Path $probePath) {
-            if ($DryRun) {
-                Write-SheepFox "  [dry-run] would remove $probePath"
-            } else {
-                Remove-Item -Path $probePath -Force
-                Write-SheepFox "  [removed] $probePath" "Green"
-            }
-        } else {
-            Write-SheepFox "  [info] no probe file present."
-        }
-        exit 0
-    }
-    $probeCss = @"
-/* (SheepFox) CSS load probe - written by -Probe, removed by -Unprobe.
-   A RED toolbar means Firefox is reading userChrome.css from this profile. */
-#nav-bar {
-  background: #cc0000 !important;
-}
-#urlbar {
-  outline: 3px solid #00ff88 !important;
-  outline-offset: -3px !important;
-}
-"@
-    if ($DryRun) {
-        Write-SheepFox "  [dry-run] would write $probePath"
-    } else {
-        Write-Utf8NoBom -Path $probePath -Content $probeCss
-        Write-SheepFox "  [write] $probePath" "Green"
-        Write-Host ""
-        Write-SheepFox "  Now QUIT Firefox completely (Task Manager: no firefox.exe), start it and" "Cyan"
-        Write-SheepFox "  open a new tab: a RED toolbar means the CSS is loading." "Cyan"
-        Write-SheepFox "  Remove it with:  .\scripts\install-windows.bat -Unprobe" "Cyan"
-    }
-    exit 0
-}
 
 # --------------------------------------------------------------------------
 # Doctor
@@ -452,29 +390,15 @@ if ($Doctor) {
     Report-Check (Test-Path $userJs) "user.js present"
     if (Test-Path $userJs) {
         $userJsText = [System.IO.File]::ReadAllText($userJs)
-        Report-Check ($userJsText -match 'toolkit\.legacyUserProfileCustomizations\.stylesheets", true') `
-            "user.js enables userChrome.css"
+        $prefCount = ([regex]::Matches($userJsText, "user_pref\(")).Count
+        Report-Check (($prefCount -ge 100)) "user.js carries the SheepFox prefs" "$prefCount user_pref lines"
     }
 
-    foreach ($pair in @(
-            @{ Name = "userChrome.css"; Min = 2000 },
-            @{ Name = "userContent.css"; Min = 400 })) {
-        $target = Join-Path $ProfilePath "chrome\$($pair.Name)"
-        $size = if (Test-Path $target) { (Get-Item $target).Length } else { 0 }
-        Report-Check (($size -ge $pair.Min)) "chrome\$($pair.Name)" "$size bytes"
-    }
-
-    foreach ($name in $UiFiles) {
-        $src = Join-Path $ChromeSrcDir $name
-        $dst = Join-Path $ProfilePath "chrome\$name"
-        if ((Test-Path $src) -and (Test-Path $dst)) {
-            $same = (Get-FileHash $src -Algorithm SHA256).Hash -eq (Get-FileHash $dst -Algorithm SHA256).Hash
-            Report-Check $same "chrome\$name matches this repo" $(if ($same) { "" } else { "stale - re-run the installer" })
-        }
-    }
-
-    if (Test-Path (Join-Path $ProfilePath "chrome\$ProbeFile")) {
-        Write-SheepFox "  [info] probe active: run -Unprobe once you have looked at the toolbar" "Gray"
+    $leftovers = @($LegacyUiFiles | ForEach-Object { Join-Path $ProfilePath "chrome\$_" } | Where-Object { Test-Path $_ })
+    if ($leftovers.Count -gt 0) {
+        Write-SheepFox "  [info] this profile still has files from the retired search-bar theme:" "Gray"
+        foreach ($path in $leftovers) { Write-SheepFox "         $path" "Gray" }
+        Write-SheepFox "         drop it with:  .\scripts\install-windows.bat -Uninstall" "Gray"
     }
 
     # Catch the number-one cause: installed into a profile Firefox never opens.
@@ -492,27 +416,12 @@ if ($Doctor) {
                 if (-not (Test-Path $candidate)) { continue }
                 $full = (Resolve-Path $candidate).Path
                 if ($full -eq (Resolve-Path $ProfilePath).Path) { continue }
-                if ((Test-Path (Join-Path $full "user.js")) -or (Test-Path (Join-Path $full "chrome\userChrome.css"))) {
+                if (Test-Path (Join-Path $full "user.js")) {
                     Write-SheepFox "  [warn] SheepFox files also exist in another profile: $full" "Yellow"
                     Write-SheepFox "         Firefox launches the profile shown at the top of this report." "Yellow"
                 }
             }
         }
-    }
-
-    $prefsJs = Join-Path $ProfilePath "prefs.js"
-    $saved = $null
-    if (Test-Path $prefsJs) {
-        $hit = Select-String -Path $prefsJs -Pattern 'user_pref\("toolkit\.legacyUserProfileCustomizations\.stylesheets",\s*(true|false)\)' -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-        if ($hit) {
-            $saved = $hit.Matches[0].Groups[1].Value -eq "true"
-        }
-    }
-    if ($null -eq $saved) {
-        Write-SheepFox "  [info] prefs.js has no saved value yet; Firefox takes it from user.js on next start" "Gray"
-    } else {
-        Report-Check $saved "pref saved in prefs.js" $(if ($saved) { "true" } else { "false - set it to true in about:config" })
     }
 
     if ($FirefoxDir -and (Test-Path $FirefoxDir)) {
@@ -555,12 +464,9 @@ if ($Doctor) {
         exit 1
     }
 
-    Write-SheepFox "  Files are in place. To prove Firefox is actually reading the stylesheet:" "Cyan"
-    Write-SheepFox "    1. .\scripts\install-windows.bat -Probe"
-    Write-SheepFox "    2. QUIT Firefox completely (Task Manager: no firefox.exe), then start it."
-    Write-SheepFox "    3. Open a new tab: RED toolbar = CSS is loading. Nothing = it is not."
-    Write-SheepFox "    4. .\scripts\install-windows.bat -Unprobe"
-    Write-SheepFox "  If the toolbar stays dark, open about:support in Firefox, compare its"
+    Write-SheepFox "  Files are in place. QUIT Firefox completely (Task Manager: no firefox.exe)," "Cyan"
+    Write-SheepFox "  then start it again."
+    Write-SheepFox "  If nothing changed, open about:support in Firefox, compare its"
     Write-SheepFox "  'Profile Folder' with the path above, then:"
     Write-SheepFox '    .\scripts\install-windows.bat -ProfilePath "<that path>"'
     exit 0
@@ -573,7 +479,7 @@ if ($Uninstall) {
     $targets = @()
     foreach ($profile in $Profiles) {
         $targets += (Join-Path $profile "user.js")
-        foreach ($name in ($UiFiles + $ProbeFile)) { $targets += (Join-Path $profile "chrome\$name") }
+        foreach ($name in $LegacyUiFiles) { $targets += (Join-Path $profile "chrome\$name") }
     }
     if ($System -and $FirefoxDir) {
         $targets += @(
@@ -600,7 +506,7 @@ if ($Uninstall) {
 }
 
 # --------------------------------------------------------------------------
-# Install: profile payload (user.js + floating search UI), every profile
+# Install: profile payload (user.js), every profile
 # --------------------------------------------------------------------------
 if ($Profiles.Count -gt 0) {
     $payload = [System.IO.File]::ReadAllText($UserJsSrc)
@@ -630,24 +536,16 @@ if ($Profiles.Count -gt 0) {
             Write-SheepFox "  [ok] installed user.js -> $targetUserJs" "Green"
         }
 
-        if ($NoUI) {
-            Write-SheepFox "  [skip] UI theme skipped (-NoUI)" "DarkYellow"
-            continue
-        }
-        foreach ($name in $UiFiles) {
-            $source = Join-Path $ChromeSrcDir $name
-            if (-not (Test-Path $source)) {
-                Write-SheepFox "  [warn] missing UI asset: $source" "Yellow"
-                continue
-            }
-            $target = Join-Path $profile "chrome\$name"
+        # A profile upgraded from <= 1.2 still carries the retired theme.
+        foreach ($name in $LegacyUiFiles) {
+            $stale = Join-Path $profile "chrome\$name"
+            if (-not (Test-Path $stale)) { continue }
             if ($DryRun) {
-                Write-SheepFox "  [dry-run] would write $target"
-                continue
+                Write-SheepFox "  [dry-run] would remove retired theme file $stale"
+            } else {
+                Remove-Item -Path $stale -Force
+                Write-SheepFox "  [removed] retired theme file $stale" "Green"
             }
-            Backup-ExistingFile -Path $target
-            Write-Utf8NoBom -Path $target -Content ([System.IO.File]::ReadAllText($source))
-            Write-SheepFox "  [ok] installed floating search UI -> $target" "Green"
         }
     }
 } elseif (-not $System) {

@@ -117,9 +117,7 @@ int main(int argc, char **argv) {
       say("  -System       install the policy + AutoConfig (default; asks for UAC)");
       say("  -Strict       add the strict anti-fingerprinting overrides");
       say("  -LowMemory    minimal-RAM profile (turns Fission isolation off)");
-      say("  -NoUI         skip the floating-search theme");
       say("  -Doctor       diagnose an install, write nothing");
-      say("  -Probe        write the CSS load probe, -Unprobe removes it");
       say("  -Report       write sheepfox-report.txt");
       say("  -Uninstall    remove everything SheepFox installed");
       say("  -DryRun       show what would happen, change nothing");

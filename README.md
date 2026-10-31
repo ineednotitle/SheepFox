@@ -73,9 +73,6 @@ SheepFox/
 │   ├── autoconfig/
 │   │   ├── defaults/pref/local-settings.js   # general.config.* bootstrap
 │   │   └── sheepfox.cfg                      # generated AutoConfig (line 1 is a comment)
-│   ├── chrome/                      # UI theme: floating Zen/Arc-style search pill
-│   │   ├── userChrome.css           #   centred pill on blank tabs (toolbar untouched)
-│   │   └── userContent.css          #   clears the New Tab wordmark, lifts the shortcuts
 │   ├── distribution/policies.json   # SheepShields: telemetry off + uBlock Origin on
 │   └── overrides/                   # user-overrides.example.js, strict-paranoia.override.js,
 │                                    #   low-memory.override.js
@@ -109,7 +106,7 @@ SheepFox/
 │   └── macos/                       # "Install SheepFox.command" + README.txt
 │
 ├── scripts/                         # install.py, install-unix.sh, install-windows.{bat,ps1}
-├── tests/test_repo.py               # 96 tests, stdlib only
+├── tests/test_repo.py               # 82 tests, stdlib only
 └── .github/workflows/               # validate-configs.yml, release-installers.yml,
                                      #   build-sheepfox.yml (fork compile, manual)
 ```
@@ -126,7 +123,7 @@ Backups of any existing `user.js` are written first (`user.js.sheepfox-backup-<t
 git clone https://github.com/ineednotitle/SheepFox.git && cd SheepFox
 ./scripts/install-unix.sh --dry-run      # preview every path first
 
-./scripts/install-unix.sh                # user.js + floating CSS + SheepShields policy
+./scripts/install-unix.sh                # user.js + SheepShields policy
                                          #   (asks for sudo once: the policy lives next to the
                                          #    Firefox binary, and that is what preinstalls
                                          #    uBlock Origin + Decentraleyes)
@@ -212,112 +209,32 @@ Verify in Firefox: `about:policies` shows *ExtensionSettings* as **Active**, and
 lists uBlock Origin and Decentraleyes within a few seconds of the first start. If the machine is
 offline at that moment, Firefox downloads them on the first start where AMO is reachable.
 
-### UI: floating new-tab search (Zen / Arc style)
+### UI: stock Firefox, deliberately untouched
 
-Open a new tab (`Ctrl+T`), or just focus the address bar on any page (`Ctrl+L` / clicking it), and
-the bar detaches from the toolbar and floats **in the middle of the page** as a compact rounded pill
-(52 px, max 620 px wide, centred at `42vh`). On a new tab the wordmark is removed and the shortcut
-grid sits below it — Zen's empty canvas with Arc's command bar. Blur it and it docks straight back.
+SheepFox does not style the browser interface. Releases up to **1.2** also wrote
+`chrome/userChrome.css` + `chrome/userContent.css` into the profile (a floating Zen/Arc-style
+search pill on `Ctrl+T` / `Ctrl+L`); that theme is **removed**. A profile now receives a `user.js`
+and nothing else, so the toolbar, the New Tab page, the tab strip and every menu are exactly what
+Mozilla ships. `toolkit.legacyUserProfileCustomizations.stylesheets` is no longer set either, so
+Firefox never even looks for profile CSS.
 
-Firefox focuses the address bar on a new tab and auto-opens its suggestions dropdown; that dropdown
-is collapsed while the field is empty, so a blank tab really is a pill and not a form. As soon as
-you type, the list opens **underneath** the pill (Arc/Zen behaviour) and the pill grows downwards;
-load the page and it docks back into the stock toolbar with normal autocomplete.
+It was the wrong shape of feature for this suite: browser-UI CSS is the one part that breaks on
+every Firefox redesign, needs a per-version selector matrix to stay alive, and is the first thing
+to go wrong for someone who only wanted the speed and privacy prefs.
 
-The implementation follows Zen Browser's own `floating-urlbar` theme: `position: fixed` with
-`!important` on the properties Firefox otherwise sets itself (`top`, `left`, `width`). Centring is
-done with `left: 0` + `right: 0` + `margin-inline: auto`, which centres inside whatever box the fixed
-bar lands in — `left: 50%` + `translate: -50%` assumed the containing block was the window and
-drifted half a pill width to the left whenever an ancestor claimed it.
-
-**No `@namespace`.** Almost every floating-urlbar snippet on the internet opens with
-`@namespace url("...there.is.only.xul")`. That sets the *default* namespace, which applies to type
-selectors **and the universal selector** — and `#urlbar` is `*#urlbar`. Firefox built the bar as
-`<hbox id="urlbar">` (XUL) until ~135, but since 140 it is a plain HTML element
-(`<html:div id="urlbar">`, `<html:moz-urlbar id="urlbar">` since 152). With that boilerplate in
-place, every `#urlbar` rule silently matches nothing, with no console error — while `#nav-bar`
-snips keep working because the toolbar is still XUL. That is why SheepFox's earlier builds looked
-"installed but dead". Every selector here is id/attribute/class based, so no namespace is declared.
-
-The open state is detected four ways so one file covers every Firefox: `[pageproxystate="invalid"]`
-(blank tab, all versions), `[breakout][breakout-extend]` (the megabar breakout, ~72–151),
-`[expanded]` (what `SmartbarInput.mjs` sets on 152+) and `[open]` (results view open over a page).
-
-Geometry is deliberately in **viewport units** (`42vh`, `50vw`), and every ancestor
-(`#main-window` → `#urlbar-container`) has its `transform`/`contain`/`will-change` neutralised: any
-of those would make the toolbar — not the window — the containing block for a `position: fixed` bar,
-which put the pill at a negative offset (a sliver at the very top of the window) instead of the
-middle of the page.
-
-Every visual rule is **scoped to a floating state**. Earlier builds styled `#urlbar-input` and
-`.urlbar-input-container` unconditionally, which inflated and re-centred the *toolbar* bar on every
-normal page — a full-width, 56 px, centre-aligned address bar on YouTube and everywhere else. Only
-the pill states get the treatment now; normal browsing is untouched.
-
-A small **"SheepFox UI" badge** appears in the corner **while the pill is out** — it is drawn by
-this stylesheet, so if you can read it, `userChrome.css` is parsed and applied and anything still
-wrong is a selector rather than an install. It is gated to the floating state on purpose: a label
-pinned to the corner of every page forever is exactly the clutter this theme exists to remove.
-Delete the `PROOF-OF-LOAD BADGE` block if you do not want it at all.
-
-Typing happens on the **left**, not in the middle. The placeholder is centred; the value is not.
-Centring the value made every keystroke shift the text, and a long URL overflowed *both* ends while
-the caret walked out of the pill — the one place in this theme where "prettier" was also
-"unusable".
-
-The suggestions panel is part of the same card: stock Firefox paints its own background, border and
-shadow around the results, which showed up as a second frame inside the pill (both are neutralised
-here). Its height is `min(52vh, 100vh − 42vh − 90px)`, so the list scrolls inside the card instead
-of painting past the bottom of the window — the old flat `62vh` cap started at `42vh` and therefore
-overflowed by 4vh. On windows shorter than 700 px the pill itself moves up to `34vh` to leave room.
-
-Nothing sets `will-change`. The file used to end with `#urlbar { will-change: transform }`, which
-promoted the address bar to its own compositing layer on **every** page for an animation that does
-not exist — the pill only animates `box-shadow`. The docked bar now composites exactly like stock
-Firefox.
-
-The installer now writes to **every Firefox profile on the machine** (standard, Microsoft Store and
-portable roots, read from `installs.ini` first) — landing in the wrong profile is the classic reason
-a `userChrome` theme does nothing. Use `--profile` / `-ProfilePath` to target exactly one.
-
-It ships as **profile CSS**, not a patch, so it is instantly reversible:
+Upgrading from 1.2 or older? The installer deletes the leftover `chrome/userChrome.css`,
+`chrome/userContent.css` and `chrome/sheepfox-probe.css` from every profile it touches, and
+`--uninstall` removes them too — `--doctor` prints them if they are still there.
 
 ```bash
-./scripts/install-unix.sh            # installs config/chrome/*.css into <profile>/chrome/
-./scripts/install-unix.sh --no-ui    # everything except the UI theme
-./scripts/install-unix.sh --low-memory   # minimal-RAM override (see below)
+./scripts/install-unix.sh                  # user.js + SheepShields policy (no UI files)
+./scripts/install-unix.sh --low-memory     # minimal-RAM override (see below)
 ```
 
 ```powershell
 .\scripts\install-windows.bat
-.\scripts\install-windows.bat -NoUI
 .\scripts\install-windows.bat -LowMemory
 ```
-
-Why it cannot break browsing: the pill has exactly **one** trigger — the
-`#urlbar[pageproxystate="invalid"]` attribute Firefox sets whenever the bar is not showing a loaded
-page. That is a new tab, or an address you are editing; a loaded page never matches, so navigation,
-bookmarks, downloads and autocomplete behave exactly like stock Firefox. (Earlier builds also
-required `#urlbar-input:placeholder-shown`; on a freshly opened tab the placeholder is not always
-painted yet, so that extra condition silently stopped the whole theme from applying. It is now used
-only to decide whether to collapse the empty suggestion list.) The sheet honours
-`prefers-color-scheme` and `prefers-reduced-motion`, and Firefox only reads it because
-`toolkit.legacyUserProfileCustomizations.stylesheets = true` is already set in
-`config/modules/03-cleanfox.js`.
-
-Tuning or removing it:
-
-| Want | Do |
-| :--- | :--- |
-| Move the pill / resize it | edit `--sheepfox-pill-top` (default `42vh`; use `50vh` for dead-centre), `--sheepfox-pill-width`, `--sheepfox-pill-height` in your profile's `chrome/userChrome.css` |
-| Dock it the moment you type instead of expanding | uncomment the "dock while typing" block at the bottom of `config/chrome/userChrome.css`, then reinstall |
-| Shrink it back to a normal bar | delete `<profile>/chrome/userChrome.css` |
-| Keep the pill, restore the New Tab logo | delete `<profile>/chrome/userContent.css` |
-| Uninstall everything | `python3 scripts/install.py --uninstall` (removes both files) |
-
-Edits survive reinstalls until you re-run the installer, which rewrites the files from
-`config/chrome/` (backing up the previous copy first). To make a UI change permanent, edit
-`config/chrome/*.css` in the repo and reinstall — the same rule as the prefs.
 
 ### Reverting
 
@@ -336,7 +253,7 @@ Timestamped backups are always left in place; restore the newest
 
 Both installers are thin wrappers around the *same* `scripts/` the git checkout
 runs. Nothing is re-implemented inside them, so a fix to `config/` — a preference,
-a policy, `userChrome.css` — reaches the installers the next time they are built,
+a policy, an override — reaches the installers the next time they are built,
 and every switch below behaves identically whatever way you install SheepFox.
 
 | Artifact | Platform | What double-clicking it does |
@@ -360,8 +277,7 @@ SheepFox-Setup-1.0.0.exe /?
 ```
 
 `/?` prints the switch list (`-ProfileOnly`, `-NoExtensions`, `-System`,
-`-Strict`, `-LowMemory`, `-NoUI`, `-Doctor`, `-Probe`, `-Unprobe`, `-Report`,
-`-Uninstall`, `-DryRun`). A plain double-click installs the policy too, so UAC
+`-Strict`, `-LowMemory`, `-Doctor`, `-Report`, `-Uninstall`, `-DryRun`). A plain double-click installs the policy too, so UAC
 prompts once — that is what preinstalls uBlock Origin and Decentraleyes. There
 is no separate "run as administrator" step, and no PowerShell ExecutionPolicy
 error because the launcher always passes `-ExecutionPolicy Bypass -NoProfile`.
@@ -378,7 +294,7 @@ sh "/Volumes/SheepFox/Install SheepFox.command" --doctor
 
 **Neither installer** writes a registry key, installs a service, starts a
 background process or downloads anything. They copy the same `user.js`,
-`chrome/*.css`, `policies.json` and AutoConfig files as Mode 1, back up whatever
+`policies.json` and AutoConfig files as Mode 1, back up whatever
 they replace, and exit. `-Uninstall` / `--uninstall` removes everything again.
 
 ### Building them yourself
@@ -481,7 +397,7 @@ What the suite enforces:
 
 ---
 
-## Troubleshooting: the UI (or any change) did not apply
+## Troubleshooting: a change did not apply
 
 Run the built-in doctor first — it reports the exact profile in use and whether each piece landed:
 
@@ -493,25 +409,10 @@ Run the built-in doctor first — it reports the exact profile in use and whethe
 python3 scripts/install.py --doctor
 ```
 
-It checks `user.js`, `chrome/userChrome.css`, `chrome/userContent.css`, whether those copies are
-**byte-identical to this repo** (a stale file from an older version is a silent no-op), whether
-`toolkit.legacyUserProfileCustomizations.stylesheets` is *saved* as `true` in `prefs.js`, the system
-files (`sheepfox.cfg`, `local-settings.js`, `policies.json`), and whether your SheepFox files ended
-up in a **different profile than the one Firefox launches** — the single most common cause.
-
-Then prove the stylesheet is actually being read. `-Probe` writes
-`chrome/sheepfox-probe.css`, which `userChrome.css` already imports; it paints the toolbar **red**
-and gives the pill a green outline:
-
-```powershell
-.\scripts\install-windows.bat -Probe     # then quit Firefox fully and start it
-.\scripts\install-windows.bat -Unprobe   # remove the probe
-```
-
-```bash
-python3 scripts/install.py --probe
-python3 scripts/install.py --unprobe
-```
+It checks that `user.js` is present and how many `user_pref` lines it carries, the system files
+(`sheepfox.cfg`, `local-settings.js`, `policies.json`), the extension preinstall, and whether your
+SheepFox files ended up in a **different profile than the one Firefox launches** — the single most
+common cause. It also lists leftovers from the retired 1.2 search-bar theme.
 
 Still stuck? Write a full report and paste it:
 
@@ -527,18 +428,15 @@ python3 scripts/install.py --report report.txt
 | :--- | :--- | :--- |
 | Doctor says the files are missing | installers write to the **active** profile only | `.\scripts\install-windows.bat -ProfilePath "%APPDATA%\Mozilla\Firefox\Profiles\<yours>"` |
 | Doctor passes, nothing changes | Firefox still running (config is read at startup) | quit fully — Task Manager must show no `firefox.exe` — then relaunch |
-| Doctor passes, CSS still ignored | pref saved as `false` by another hardening tool | `about:config` → `toolkit.legacyUserProfileCustomizations.stylesheets` → `true`, restart |
-| New Tab logo changed but no pill | older Firefox without `:has()` support (< 121) | upgrade, or use the `.default`-profile rules only |
+| Profile still has `chrome/userChrome.css` | installed over SheepFox 1.2 or older | re-run the installer (it deletes the retired theme files), or `--uninstall` |
 | Windows Store Firefox | profile lives under `%LOCALAPPDATA%\Packages\Mozilla.Firefox_*` | handled automatically now; `-Doctor` prints the profile it uses (override with `-ProfilePath`) |
-| Doctor flags "stale" | profile has an older copy of the CSS | re-run the installer, then restart Firefox |
-| Need proof CSS loads at all | `userChrome.css` may not be read | focus the bar (`Ctrl+L`) or open a new tab and look for the **"SheepFox UI"** badge in the corner, or run `.\scripts\install-windows.bat -Probe` → the whole top strip of the window turns red ⇒ CSS loads. Remove with `-Unprobe` |
-| Copied a floating-urlbar snippet, nothing happens | a default `@namespace ...xul` kills every `#urlbar` rule (the bar is HTML since Firefox 140) | delete the `@namespace` line — SheepFox's own sheet has none |
+| Prefs look inert | a later `user.js` writer (another hardening tool) overwrote yours | re-run the installer last, or merge the two files |
 
 Prove *where* your profile is:
 
 ```powershell
 Get-ChildItem "$env:APPDATA\Mozilla\Firefox\Profiles" -Directory |
-  ForEach-Object { "$($_.Name)  chrome=$(Test-Path (Join-Path $_.FullName 'chrome\userChrome.css'))  user.js=$(Test-Path (Join-Path $_.FullName 'user.js'))" }
+  ForEach-Object { "$($_.Name)  user.js=$(Test-Path (Join-Path $_.FullName 'user.js'))" }
 ```
 
 ## RAM & CPU footprint

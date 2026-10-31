@@ -6,7 +6,7 @@
 // AUTO-GENERATED FILE — DO NOT EDIT BY HAND.
 // Edit config/modules/*.js and run:  make build-configs
 // Modules: 01-speedfox.js, 02-shieldfox.js, 03-cleanfox.js, 04-smoothfox.js
-// Preferences: 132 (27 locked in the system AutoConfig)
+// Preferences: 131 (27 locked in the system AutoConfig)
 //
 // `// @lock` annotations are inert here: they only promote a preference to
 // lockPref() inside config/autoconfig/sheepfox.cfg.
@@ -248,9 +248,7 @@ user_pref("browser.discovery.enabled", false);
 user_pref("browser.shell.checkDefaultBrowser", false);
 user_pref("browser.aboutConfig.showWarning", false);
 
-// --- UI Customization & Annoyance Blocking ---
-// Enables config/chrome/*.css: the floating Zen/Arc-style new-tab search pill
-user_pref("toolkit.legacyUserProfileCustomizations.stylesheets", true);
+// --- Annoyance Blocking ---
 // Block intrusive notification and geolocation popups by default; a site can
 // still earn a per-site grant from the address-bar permission panel
 user_pref("permissions.default.desktop-notification", 2);
