@@ -6,7 +6,7 @@
 // AUTO-GENERATED FILE — DO NOT EDIT BY HAND.
 // Edit config/modules/*.js and run:  make build-configs
 // Modules: 01-speedfox.js, 02-shieldfox.js, 03-cleanfox.js, 04-smoothfox.js
-// Preferences: 134 (27 locked in the system AutoConfig)
+// Preferences: 132 (27 locked in the system AutoConfig)
 //
 // `// @lock` annotations are inert here: they only promote a preference to
 // lockPref() inside config/autoconfig/sheepfox.cfg.
@@ -25,9 +25,10 @@
 // ============================================================================
 
 // --- Rendering & Content Layout Pipeline ---
-// Fast initial visual paint (5ms avoids flash-of-unstyled-content jank while
-// still feeling instantaneous)
-user_pref("nglayout.initialpaint.delay", 5);
+// Paint as soon as there is something to paint. The Gecko default is already 0;
+// the old 5 ms here delayed first paint (and the "avoids a flash of unstyled
+// content" note was wrong - that delay only ever throttled paints).
+user_pref("nglayout.initialpaint.delay", 0);
 
 // --- WebRender, GPU Compositing & Skia Acceleration ---
 // Enable the full GPU-driven WebRender pipeline and pre-cache shaders so the
@@ -35,10 +36,13 @@ user_pref("nglayout.initialpaint.delay", 5);
 user_pref("gfx.webrender.all", true);
 user_pref("gfx.webrender.precache-shaders", true);
 user_pref("gfx.webrender.compositor", true);
-// Hardware-accelerated 2D Canvas with a 512 MB VRAM surface cache
+// Hardware-accelerated 2D Canvas. The cache is capped at 128 MB (Firefox's own
+// default is 256 MB) because this profile is meant to use less RAM, not more:
+// 512 MB of canvas surfaces is a second browser's worth of memory on a 4 GB
+// machine. Canvas-heavy apps (Figma, Maps) still fit comfortably.
 user_pref("gfx.canvas.accelerated", true);
-user_pref("gfx.canvas.accelerated.cache-items", 4096);
-user_pref("gfx.canvas.accelerated.cache-size", 512);
+user_pref("gfx.canvas.accelerated.cache-items", 1024);
+user_pref("gfx.canvas.accelerated.cache-size", 128);
 // Expand the Skia glyph raster cache to 20 MB for crisp, zero-stall typography
 user_pref("gfx.content.skia-font-cache-size", 20);
 // Keep GPU work inside its own crash-resilient process (never disable: a GPU
@@ -56,8 +60,10 @@ user_pref("browser.cache.memory.enable", true);
 // 256 MB in-memory media/HTTP cache
 user_pref("browser.cache.memory.capacity", 262144);
 user_pref("browser.cache.memory.max_entry_size", 32768);
-// Keep 4 recent pages in the Back/Forward cache for 0ms history navigation
-user_pref("browser.sessionhistory.max_total_viewers", 4);
+// Back/Forward cache stays on (Firefox default). The old
+// browser.sessionhistory.max_total_viewers knob has been ignored since Fx 57 -
+// setting it to 4 looked like a cap but changed nothing; the live limit is
+// browser.sessionhistory.max_total_invisible_viewers, left at the default 10.
 // Parallelise image decode and enlarge media streaming buffers
 user_pref("image.mem.decode_bytes_at_a_time", 65536);
 user_pref("image.cache.size", 10485760);
@@ -148,8 +154,12 @@ user_pref("browser.send_pings", false);
 // --- HTTPS-Only, CRLite Local Revocation & Encrypted DNS (DoH) ---
 user_pref("dom.security.https_only_mode", true);
 user_pref("dom.security.https_only_mode_send_http_background_request", false);
-user_pref("security.ssl.require_safe_negotiation", true);
 user_pref("security.tls.enable_0rtt_data", false);
+// (security.ssl.require_safe_negotiation used to be forced on here. It aborts
+// the handshake when a server does not implement RFC 7507's fallback SCSV,
+// which turned ordinary HTTPS sites and some corporate proxies into
+// SSL_ERROR_UNSAFE_NEGOTIATION. Dropped: this suite promises zero site
+// breakage, and it bought no meaningful privacy.)
 // Replace live OCSP lookups (slow, and they leak every visited domain) with
 // Mozilla's local CRLite binary filters
 user_pref("security.OCSP.enabled", 0);
@@ -269,8 +279,10 @@ user_pref("general.smoothScroll.msdPhysics.regularSpringConstant", 650);
 user_pref("general.smoothScroll.msdPhysics.slowdownMinDeltaMS", 25);
 user_pref("general.smoothScroll.msdPhysics.slowdownSpringConstant", 250);
 
-// --- Wheel feel: one notch covers more ground without feeling floaty ---
-user_pref("mousewheel.default.delta_multiplier_y", 275);
+// --- Wheel feel: one notch covers twice the ground ---
+// 275% was 2.75x, which reads as skipped content rather than speed once MSD
+// physics is also smoothing the motion. 200% stays quick and stays precise.
+user_pref("mousewheel.default.delta_multiplier_y", 200);
 
 // --- Async Pan/Zoom responsiveness ---
 user_pref("apz.overscroll.enabled", true);

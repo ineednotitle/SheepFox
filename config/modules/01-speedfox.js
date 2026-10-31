@@ -7,9 +7,10 @@
 // ============================================================================
 
 // --- Rendering & Content Layout Pipeline ---
-// Fast initial visual paint (5ms avoids flash-of-unstyled-content jank while
-// still feeling instantaneous)
-user_pref("nglayout.initialpaint.delay", 5);
+// Paint as soon as there is something to paint. The Gecko default is already 0;
+// the old 5 ms here delayed first paint (and the "avoids a flash of unstyled
+// content" note was wrong - that delay only ever throttled paints).
+user_pref("nglayout.initialpaint.delay", 0);
 
 // --- WebRender, GPU Compositing & Skia Acceleration ---
 // Enable the full GPU-driven WebRender pipeline and pre-cache shaders so the
@@ -17,10 +18,13 @@ user_pref("nglayout.initialpaint.delay", 5);
 user_pref("gfx.webrender.all", true);
 user_pref("gfx.webrender.precache-shaders", true);
 user_pref("gfx.webrender.compositor", true);
-// Hardware-accelerated 2D Canvas with a 512 MB VRAM surface cache
+// Hardware-accelerated 2D Canvas. The cache is capped at 128 MB (Firefox's own
+// default is 256 MB) because this profile is meant to use less RAM, not more:
+// 512 MB of canvas surfaces is a second browser's worth of memory on a 4 GB
+// machine. Canvas-heavy apps (Figma, Maps) still fit comfortably.
 user_pref("gfx.canvas.accelerated", true);
-user_pref("gfx.canvas.accelerated.cache-items", 4096);
-user_pref("gfx.canvas.accelerated.cache-size", 512);
+user_pref("gfx.canvas.accelerated.cache-items", 1024);
+user_pref("gfx.canvas.accelerated.cache-size", 128);
 // Expand the Skia glyph raster cache to 20 MB for crisp, zero-stall typography
 user_pref("gfx.content.skia-font-cache-size", 20);
 // Keep GPU work inside its own crash-resilient process (never disable: a GPU
@@ -38,8 +42,10 @@ user_pref("browser.cache.memory.enable", true);
 // 256 MB in-memory media/HTTP cache
 user_pref("browser.cache.memory.capacity", 262144);
 user_pref("browser.cache.memory.max_entry_size", 32768);
-// Keep 4 recent pages in the Back/Forward cache for 0ms history navigation
-user_pref("browser.sessionhistory.max_total_viewers", 4);
+// Back/Forward cache stays on (Firefox default). The old
+// browser.sessionhistory.max_total_viewers knob has been ignored since Fx 57 -
+// setting it to 4 looked like a cap but changed nothing; the live limit is
+// browser.sessionhistory.max_total_invisible_viewers, left at the default 10.
 // Parallelise image decode and enlarge media streaming buffers
 user_pref("image.mem.decode_bytes_at_a_time", 65536);
 user_pref("image.cache.size", 10485760);

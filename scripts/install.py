@@ -48,13 +48,19 @@ SHEEPFOX_EXTENSIONS = {
 PROBE_FILE = "sheepfox-probe.css"
 PROBE_CSS = """/* (SheepFox) CSS load probe.
    Written by `install.py --probe`, removed by `--unprobe`.
-   If the toolbar of a new Firefox window is RED, Firefox is definitely reading
-   userChrome.css from this profile; if it is not, the stylesheet is not being
-   loaded at all (wrong profile, pref off, or Firefox was never restarted). */
-#nav-bar {
-  background: #cc0000 !important;
+   If the top of the window is RED, Firefox is definitely reading userChrome.css
+   from this profile; if it is not, the stylesheet is not being loaded at all
+   (wrong profile, pref off, or Firefox was never restarted).
+
+   Painted on #navigator-toolbox, not #nav-bar: userChrome.css makes the toolbar
+   transparent while the pill floats, and that rule is more specific - the red
+   used to vanish exactly when you were testing the floating state. The outline
+   doubles the #urlbar id for the same reason: it has to outrank the pill's own
+   `outline: none`. */
+#navigator-toolbox {
+  background-color: #cc0000 !important;
 }
-#urlbar {
+#urlbar#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) {
   outline: 3px solid #00ff88 !important;
   outline-offset: -3px !important;
 }

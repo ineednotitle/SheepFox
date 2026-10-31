@@ -9,8 +9,9 @@ Bake the three highest-impact rendering defaults into the binary:
     instead of on the first scroll/animation, removing first-frame hitching.
   * gfx.content.skia-font-cache-size=20   (from 5 MB) keeps glyph rasters hot for
     text-heavy pages.
-  * gfx.canvas.accelerated.cache-size=512 (from 256 MB) gives hardware-accelerated
-    Canvas surfaces room to stay resident.
+  * gfx.canvas.accelerated.cache-size=128 (from 256 MB) halves the worst-case
+    Canvas surface cache - this is a low-RAM profile, and 512 MB of resident
+    canvas surfaces was the single biggest regression against that goal.
 
 Deliberately NOT changed here: gfx.webrender.all and layers.gpu-process.enabled.
 Firefox decides those per GPU/driver at runtime, and forcing them on unsupported
@@ -30,7 +31,7 @@ index 80be46d..ae03320 100644
  - name: gfx.canvas.accelerated.cache-size
    type: RelaxedAtomicUint32
 -  value: 256
-+  value: 512
++  value: 128
    mirror: always
  
  - name: gfx.canvas.accelerated.reserve-empty-cache

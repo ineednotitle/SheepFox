@@ -13,8 +13,10 @@ user_pref("general.smoothScroll.msdPhysics.regularSpringConstant", 650);
 user_pref("general.smoothScroll.msdPhysics.slowdownMinDeltaMS", 25);
 user_pref("general.smoothScroll.msdPhysics.slowdownSpringConstant", 250);
 
-// --- Wheel feel: one notch covers more ground without feeling floaty ---
-user_pref("mousewheel.default.delta_multiplier_y", 275);
+// --- Wheel feel: one notch covers twice the ground ---
+// 275% was 2.75x, which reads as skipped content rather than speed once MSD
+// physics is also smoothing the motion. 200% stays quick and stays precise.
+user_pref("mousewheel.default.delta_multiplier_y", 200);
 
 // --- Async Pan/Zoom responsiveness ---
 user_pref("apz.overscroll.enabled", true);

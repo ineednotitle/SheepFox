@@ -49,8 +49,12 @@ user_pref("browser.send_pings", false);
 // --- HTTPS-Only, CRLite Local Revocation & Encrypted DNS (DoH) ---
 user_pref("dom.security.https_only_mode", true);
 user_pref("dom.security.https_only_mode_send_http_background_request", false);
-user_pref("security.ssl.require_safe_negotiation", true);
 user_pref("security.tls.enable_0rtt_data", false);
+// (security.ssl.require_safe_negotiation used to be forced on here. It aborts
+// the handshake when a server does not implement RFC 7507's fallback SCSV,
+// which turned ordinary HTTPS sites and some corporate proxies into
+// SSL_ERROR_UNSAFE_NEGOTIATION. Dropped: this suite promises zero site
+// breakage, and it bought no meaningful privacy.)
 // Replace live OCSP lookups (slow, and they leak every visited domain) with
 // Mozilla's local CRLite binary filters
 user_pref("security.OCSP.enabled", 0);

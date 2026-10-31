@@ -45,7 +45,7 @@ Mode 1 takes about ten seconds. Mode 2 takes about an hour of CPU and 40 GB of d
 | Pillar | Stock Firefox | Strict hardening | **(SheepFox) Firefox** |
 | :--- | :--- | :--- | :--- |
 | **Ad & tracker blocking** | none — every ad byte is downloaded | manual | **SheepShields `policies.json`** auto-installs uBlock Origin + `easylist`, `easyprivacy`, `ublock-badware`, `ublock-privacy`, `urlhaus-1` |
-| **GPU / rendering** | conservative defaults | often disables WebGL and Canvas accel | **WebRender + shader precache + 512 MB accelerated Canvas + 20 MB Skia font cache** |
+| **GPU / rendering** | conservative defaults | often disables WebGL and Canvas accel | **WebRender + shader precache + accelerated Canvas (capped at 128 MB) + 20 MB Skia font cache** |
 | **Caching** | disk-I/O heavy | often disables caches | **256 MB RAM cache (disk cache off) + 4-page bfcache** |
 | **Network transport** | paced requests, 6 conns/host | speculative fetches disabled by default | **HTTP/3 QUIC, unpaced bursts, 1800 max conns, 10 persistent per host** |
 | **Certificate revocation** | live OCSP (slow, leaks every domain) | hard-fail OCSP (breaks sites) | **local Mozilla CRLite filters — 0 ms, zero domain leakage** (`security.OCSP.enabled = 0`, `crlite_mode = 2`) |
@@ -109,7 +109,7 @@ SheepFox/
 │   └── macos/                       # "Install SheepFox.command" + README.txt
 │
 ├── scripts/                         # install.py, install-unix.sh, install-windows.{bat,ps1}
-├── tests/test_repo.py               # 90 tests, stdlib only
+├── tests/test_repo.py               # 96 tests, stdlib only
 └── .github/workflows/               # validate-configs.yml, release-installers.yml,
                                      #   build-sheepfox.yml (fork compile, manual)
 ```
@@ -254,9 +254,27 @@ Every visual rule is **scoped to a floating state**. Earlier builds styled `#url
 normal page — a full-width, 56 px, centre-aligned address bar on YouTube and everywhere else. Only
 the pill states get the treatment now; normal browsing is untouched.
 
-A small **"SheepFox UI" badge** is drawn in the corner of the window by this stylesheet. It is
-deliberate: if you can read it, `userChrome.css` is parsed and applied, so anything still wrong is a
-selector rather than an install. Delete the `PROOF-OF-LOAD BADGE` block to remove it.
+A small **"SheepFox UI" badge** appears in the corner **while the pill is out** — it is drawn by
+this stylesheet, so if you can read it, `userChrome.css` is parsed and applied and anything still
+wrong is a selector rather than an install. It is gated to the floating state on purpose: a label
+pinned to the corner of every page forever is exactly the clutter this theme exists to remove.
+Delete the `PROOF-OF-LOAD BADGE` block if you do not want it at all.
+
+Typing happens on the **left**, not in the middle. The placeholder is centred; the value is not.
+Centring the value made every keystroke shift the text, and a long URL overflowed *both* ends while
+the caret walked out of the pill — the one place in this theme where "prettier" was also
+"unusable".
+
+The suggestions panel is part of the same card: stock Firefox paints its own background, border and
+shadow around the results, which showed up as a second frame inside the pill (both are neutralised
+here). Its height is `min(52vh, 100vh − 42vh − 90px)`, so the list scrolls inside the card instead
+of painting past the bottom of the window — the old flat `62vh` cap started at `42vh` and therefore
+overflowed by 4vh. On windows shorter than 700 px the pill itself moves up to `34vh` to leave room.
+
+Nothing sets `will-change`. The file used to end with `#urlbar { will-change: transform }`, which
+promoted the address bar to its own compositing layer on **every** page for an animation that does
+not exist — the pill only animates `box-shadow`. The docked bar now composites exactly like stock
+Firefox.
 
 The installer now writes to **every Firefox profile on the machine** (standard, Microsoft Store and
 portable roots, read from `installs.ini` first) — landing in the wrong profile is the classic reason
@@ -444,8 +462,8 @@ What the suite enforces:
    for `// @lock` lines (everything else is `defaultPref()`, so it stays editable in Settings).
 3. Core speed/privacy invariants: dFPI `cookieBehavior = 5`, GPC, query stripping, HTTPS-Only,
    CRLite (`OCSP.enabled = 0`, `crlite_mode = 2`), Quad9 DoH (`trr.mode = 2`), WebRTC
-   `default_address_only`, 512 MB canvas cache, 20 MB Skia cache, 256 MB RAM cache, HTTP/3,
-   1800 connections, 4-page bfcache.
+   `default_address_only`, 128 MB canvas cache, 20 MB Skia cache, 256 MB RAM cache, HTTP/3,
+   1800 connections, `nglayout.initialpaint.delay = 0`, and no dead `sessionhistory` knob.
 4. Zero-breakage invariants: `resistFingerprinting = false` and **not locked**,
    `fingerprintingProtection = true`, `layers.gpu-process.enabled = true`.
 5. Telemetry/PPA/studies/Pocket/sponsored/ML preferences are `false` **and** locked.
@@ -513,7 +531,7 @@ python3 scripts/install.py --report report.txt
 | New Tab logo changed but no pill | older Firefox without `:has()` support (< 121) | upgrade, or use the `.default`-profile rules only |
 | Windows Store Firefox | profile lives under `%LOCALAPPDATA%\Packages\Mozilla.Firefox_*` | handled automatically now; `-Doctor` prints the profile it uses (override with `-ProfilePath`) |
 | Doctor flags "stale" | profile has an older copy of the CSS | re-run the installer, then restart Firefox |
-| Need proof CSS loads at all | `userChrome.css` may not be read | look for the **"SheepFox UI"** badge in the corner, or run `.\scripts\install-windows.bat -Probe` → red toolbar ⇒ CSS loads. Remove with `-Unprobe` |
+| Need proof CSS loads at all | `userChrome.css` may not be read | focus the bar (`Ctrl+L`) or open a new tab and look for the **"SheepFox UI"** badge in the corner, or run `.\scripts\install-windows.bat -Probe` → the whole top strip of the window turns red ⇒ CSS loads. Remove with `-Unprobe` |
 | Copied a floating-urlbar snippet, nothing happens | a default `@namespace ...xul` kills every `#urlbar` rule (the bar is HTML since Firefox 140) | delete the `@namespace` line — SheepFox's own sheet has none |
 
 Prove *where* your profile is:
@@ -536,6 +554,8 @@ telemetry/ML/Pocket workers, SheepFox ships these measured knobs in `config/modu
 | `browser.tabs.unloadOnLowMemory` | true | **true** | idle tabs are discarded instead of swapping/crashing |
 | `browser.ml.enable` | true | **false** | no inference worker process at all |
 | `browser.cache.disk.enable` | true | **false** | no disk cache; hot assets come from the 256 MB RAM cache |
+| `gfx.canvas.accelerated.cache-size` | 256 MB | **128 MB** | canvas surfaces stay resident without a second browser's worth of VRAM |
+| `nglayout.initialpaint.delay` | 0 ms | **0 ms** | (was 5 ms here — that *delayed* first paint for no benefit) |
 
 ### Need even less? `--low-memory`
 

@@ -16,7 +16,8 @@ user_pref("dom.ipc.processCount", 2);
 
 // Smaller in-memory caches. Disk cache stays off (see 01-speedfox.js).
 user_pref("browser.cache.memory.capacity", 65536);
-user_pref("browser.sessionhistory.max_total_viewers", 1);
+// Fewer pages kept in the Back/Forward cache (the pref that actually works).
+user_pref("browser.sessionhistory.max_total_invisible_viewers", 2);
 user_pref("media.cache_size", 32768);
 
 // Reclaim idle tabs sooner once memory pressure starts.

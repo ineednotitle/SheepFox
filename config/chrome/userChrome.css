@@ -56,10 +56,19 @@
   --sheepfox-pill-speed: 160ms;
 }
 
+/* Short windows (a laptop in split view, a small VM): lift the pill so the
+   results list still has somewhere to go. */
+@media (max-height: 700px) {
+  :root {
+    --sheepfox-pill-top: 34vh;
+  }
+}
+
 @media (prefers-color-scheme: light) {
   :root {
     --sheepfox-pill-bg: rgba(255, 255, 255, 0.96);
     --sheepfox-pill-border: rgba(15, 23, 42, 0.10);
+    --sheepfox-pill-border-focus: rgba(15, 23, 42, 0.26);
     --sheepfox-pill-text: #0f172a;
   }
 }
@@ -68,6 +77,7 @@
   :root {
     --sheepfox-pill-bg: rgba(32, 32, 36, 0.96);
     --sheepfox-pill-border: rgba(255, 255, 255, 0.14);
+    --sheepfox-pill-border-focus: rgba(255, 255, 255, 0.34);
     --sheepfox-pill-text: #f4f4f5;
   }
 }
@@ -140,16 +150,26 @@
   overflow: visible !important;
   visibility: visible !important;
   opacity: 1 !important;
+  /* box-shadow/border/background only: `top` never changes while the bar
+     floats, and transitioning it would animate a layout property for nothing. */
   transition:
     box-shadow var(--sheepfox-pill-speed) ease,
-    top var(--sheepfox-pill-speed) ease !important;
+    border-color var(--sheepfox-pill-speed) ease,
+    background-color var(--sheepfox-pill-speed) ease !important;
 }
 
-/* With suggestions open, let the pill grow downwards — capped so it can never
-   run off the bottom of the window. */
+/* The pill removed Firefox's violet ring, so it owes keyboard users a visible
+   edge of its own. */
+#urlbar:is([focused="true"], [open], [expanded]) {
+  border-color: var(--sheepfox-pill-border-focus) !important;
+}
+
+/* With suggestions open, let the pill grow downwards - but never past the
+   bottom of the window. A flat 62vh overflowed: the shell starts at
+   --sheepfox-pill-top (42vh), and 42 + 62 is more than 100. */
 #urlbar:is([breakout][breakout-extend], [expanded], [open]) {
   height: auto !important;
-  max-height: 62vh !important;
+  max-height: min(62vh, calc(100vh - var(--sheepfox-pill-top) - 40px)) !important;
 }
 
 /* Firefox paints the bar's surface on #urlbar-background (a XUL <hbox> up to
@@ -157,7 +177,9 @@
    exists, while #urlbar itself is always filled by the shell rule above. */
 #urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) #urlbar-background {
   height: 100% !important;
-  border: 1px solid var(--sheepfox-pill-border) !important;
+  /* No border here: the shell already draws one, and a second 1px line inside
+     it rendered as a double edge on Firefox <= 151. */
+  border: none !important;
   border-radius: var(--sheepfox-pill-radius) !important;
   background: var(--sheepfox-pill-bg) !important;
   box-shadow: none !important;
@@ -176,18 +198,30 @@
   display: none !important;
 }
 
-#urlbar:is([pageproxystate="invalid"], [focused="true"], [open]) #urlbar-results {
+#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) #urlbar-results {
   /* Pin the panel to the pill instead of letting it keep the toolbar geometry:
-     that mismatch is what made the list sit half a pill width to the right. */
+     that mismatch is what made the list sit half a pill width to the right.
+     Stock Firefox also paints its own background + border here, which showed up
+     as a second frame inside the pill - the pill is the only surface. */
   margin: 8px 0 10px !important;
   width: 100% !important;
   max-width: 100% !important;
   inset-inline: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
 }
 
-#urlbar:is([pageproxystate="invalid"], [focused="true"]) .urlbarView {
-  max-height: 52vh !important;
+#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) .urlbarView {
+  /* Scroll inside the card instead of letting the list paint past the pill and
+     off the bottom of the window: the shell's max-height cannot clip it,
+     because it must stay overflow:visible for the shadow. */
+  max-height: min(52vh, calc(100vh - var(--sheepfox-pill-top) - 90px)) !important;
   overflow-y: auto !important;
+  overflow-x: hidden !important;
+  overscroll-behavior: contain !important;
+  scrollbar-width: thin !important;
+  border-radius: 0 0 var(--sheepfox-pill-radius) var(--sheepfox-pill-radius) !important;
 }
 
 /* ----------------------------------------------------------------------------
@@ -204,12 +238,23 @@
 
 #urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) #urlbar-input {
   font-size: 15px !important;
-  text-align: center !important;
+  /* Only the placeholder is centred. Centring the *value* made every keystroke
+     shift the text, and a long URL overflowed both ends while the caret walked
+     off the pill - the one place where "prettier" is also "unusable". */
+  text-align: start !important;
   color: var(--sheepfox-pill-text) !important;
+  caret-color: var(--sheepfox-pill-text) !important;
+}
+
+/* An empty field is centred; the moment there is a value it starts at the left.
+   (:placeholder-shown is the reliable switch - ::placeholder only accepts the
+   ::first-line subset of properties, so `text-align` there is not guaranteed
+   to do anything.) */
+#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) #urlbar-input:placeholder-shown {
+  text-align: center !important;
 }
 
 #urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) #urlbar-input::placeholder {
-  text-align: center !important;
   opacity: 0.72 !important;
 }
 
@@ -224,13 +269,13 @@
 }
 
 /* Subtle lift on hover — a hint that it is one big target. */
-#urlbar:is([pageproxystate="invalid"], [focused="true"], [open]):hover {
+#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]):hover {
   box-shadow: var(--sheepfox-pill-shadow-hover) !important;
 }
 
 /* Make the toolbar recede while the pill is out, so it reads as floating on the
    page rather than sitting in a strip. */
-#nav-bar:has(#urlbar:is([pageproxystate="invalid"], [focused="true"])) {
+#nav-bar:has(#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open])) {
   background: transparent !important;
   border-color: transparent !important;
   box-shadow: none !important;
@@ -242,7 +287,10 @@
    read "SheepFox UI", this file is parsed and applied — so anything else that
    looks wrong is a selector, not an install. Delete this block to remove it.
    ------------------------------------------------------------------------- */
-#nav-bar::after {
+/* Only while the pill is floating. A permanent label in the corner of every
+   page is exactly the kind of clutter this theme exists to remove; press Ctrl+L
+   (or open a new tab) and it is there to confirm the stylesheet loaded. */
+#nav-bar:has(#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]))::after {
   content: "SheepFox UI" !important;
   position: fixed !important;
   right: 10px !important;
@@ -295,8 +343,17 @@
 /* ----------------------------------------------------------------------------
    7. POLISH
    ------------------------------------------------------------------------- */
-#urlbar {
-  will-change: transform;
+/* No `will-change` anywhere on the bar. It used to carry `will-change:
+   transform` here, which promoted the address bar to its own compositing layer
+   on every page for an animation that does not exist - the pill only animates
+   box-shadow, and the docked bar animates nothing at all. */
+
+/* Windows High Contrast / forced colours: the translucent pill is flattened by
+   the OS, so the edge has to come from the system palette. */
+@media (forced-colors: active) {
+  #urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) {
+    border: 1px solid CanvasText !important;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

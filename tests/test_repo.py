@@ -186,11 +186,16 @@ class TestPreferenceInvariants(unittest.TestCase):
         self.assertIs(self.value("gfx.webrender.all"), True)
         self.assertIs(self.value("gfx.webrender.precache-shaders"), True)
         self.assertIs(self.value("gfx.canvas.accelerated"), True)
-        self.assertEqual(self.value("gfx.canvas.accelerated.cache-size"), 512)
+        # 128 MB, not Firefox's 256 MB default: this is the "less RAM" profile.
+        self.assertEqual(self.value("gfx.canvas.accelerated.cache-size"), 128)
+        self.assertEqual(self.value("gfx.canvas.accelerated.cache-items"), 1024)
         self.assertEqual(self.value("gfx.content.skia-font-cache-size"), 20)
         self.assertEqual(self.value("browser.cache.memory.capacity"), 262144)
         self.assertIs(self.value("browser.cache.disk.enable"), False)
-        self.assertEqual(self.value("browser.sessionhistory.max_total_viewers"), 4)
+        # Obsolete since Fx 57 - it looked like a BFCache cap but changed
+        # nothing. The live knob lives in the low-memory override.
+        self.assertNotIn("browser.sessionhistory.max_total_viewers", self.user)
+        self.assertEqual(self.value("nglayout.initialpaint.delay"), 0)
         self.assertIs(self.value("network.http.http3.enable"), True)
         self.assertIs(self.value("network.http.pacing.requests.enabled"), False)
         self.assertEqual(self.value("network.http.max-connections"), 1800)
@@ -205,6 +210,9 @@ class TestPreferenceInvariants(unittest.TestCase):
         self.assertEqual(self.value("security.OCSP.enabled"), 0)
         self.assertEqual(self.value("security.pki.crlite_mode"), 2)
         self.assertIs(self.value("media.peerconnection.ice.default_address_only"), True)
+        # Dropped: it aborted the handshake on servers without RFC 7507's
+        # fallback SCSV (SSL_ERROR_UNSAFE_NEGOTIATION) for no privacy gain.
+        self.assertNotIn("security.ssl.require_safe_negotiation", self.user)
         self.assertEqual(self.value("network.trr.mode"), 2)
         self.assertEqual(self.value("network.trr.uri"), "https://dns.quad9.net/dns-query")
 
@@ -386,7 +394,11 @@ class TestFloatingSearchUI(unittest.TestCase):
         # it; the open state may grow again, capped.
         self.assertIn("max-height: var(--sheepfox-pill-height)", css)
         grown = css[css.index("With suggestions open") :]
-        self.assertIn("max-height: 62vh", grown)
+        # The list may grow, but only into the space left under the pill:
+        # 42vh + 62vh used to overflow the window by 4vh.
+        self.assertIn(
+            "max-height: min(62vh, calc(100vh - var(--sheepfox-pill-top) - 40px))", grown
+        )
         # No ancestor may become the containing block of the fixed bar.
         self.assertIn("will-change: auto", css)
         self.assertIn("translate: none", css, msg="ancestor translate creates a containing block")
@@ -410,12 +422,99 @@ class TestFloatingSearchUI(unittest.TestCase):
     def test_proof_of_load_badge(self) -> None:
         """A visible marker drawn by userChrome.css itself."""
         css = read(self.CHROME)
-        self.assertIn('#nav-bar::after', css)
         self.assertIn('content: "SheepFox UI"', css)
         self.assertIn("pointer-events: none", css)
-        # It must not steal clicks or sit above the pill.
-        badge = css.split("#nav-bar::after", 1)[1].split("}", 1)[0]
+        # Only while the pill is out: a label pinned to every page forever is the
+        # clutter this theme exists to remove.
+        self.assertIn("#nav-bar:has(", css.split('content: "SheepFox UI"')[0].split("*/")[-1])
+        badge = css.split('content: "SheepFox UI"')[1].split("}", 1)[0]
         self.assertIn("position: fixed", badge)
+        self.assertIn("z-index: 99999", badge, msg="the badge must sit under the pill (100000)")
+
+    @staticmethod
+    def _declarations(css: str) -> str:
+        """The stylesheet with comments removed, so tests match real rules."""
+        return re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+
+    def test_no_permanent_compositing_layer(self) -> None:
+        """Regression: `#urlbar { will-change: transform }` sat at the end of the
+        file and promoted the address bar to its own layer on every page, for an
+        animation that does not exist (the pill animates box-shadow only)."""
+        css = self._declarations(read(self.CHROME))
+        self.assertNotRegex(css, r"will-change:\s*transform")
+        self.assertIn("will-change: auto", css, msg="ancestors must still be neutralised")
+
+    def test_results_are_one_card_with_the_pill(self) -> None:
+        """Stock Firefox paints its own panel around the results, which showed up
+        as a second frame inside the pill."""
+        css = self._declarations(read(self.CHROME))
+        block = css.split(') #urlbar-results {', 1)[1].split("}", 1)[0]
+        for prop in ("background: transparent", "border: none", "box-shadow: none"):
+            self.assertIn(prop, block, msg=f"results panel must not repaint: {prop}")
+        STATES = '#urlbar:is([pageproxystate="invalid"], [focused="true"], [breakout][breakout-extend], [expanded], [open]) '
+        view = css.split(STATES + ".urlbarView {", 1)[1].split("}", 1)[0]
+        # Scrollable inside the card, and capped so the list cannot paint off
+        # the bottom of the window (the shell must stay overflow:visible).
+        self.assertIn("overflow-y: auto", view)
+        self.assertIn("calc(100vh - var(--sheepfox-pill-top) - 90px)", view)
+        self.assertIn("scrollbar-width: thin", view)
+        self.assertIn("overscroll-behavior: contain", view)
+
+    def test_only_the_placeholder_is_centred(self) -> None:
+        """Centring the value made every keystroke shift the text and let a long
+        URL overflow both ends while the caret walked off the pill."""
+        css = read(self.CHROME)
+        rules = self._declarations(css)
+        input_rule = rules.split(') #urlbar-input {', 1)[1].split("}", 1)[0]
+        self.assertIn("text-align: start", input_rule)
+        empty = rules.split(") #urlbar-input:placeholder-shown {", 1)[1].split("}", 1)[0]
+        self.assertIn("text-align: center", empty)
+        # ::placeholder only accepts the ::first-line subset - text-align there
+        # is not guaranteed to apply, so it must not be the mechanism.
+        placeholder = rules.split(") #urlbar-input::placeholder {", 1)[1].split("}", 1)[0]
+        self.assertNotIn("text-align", placeholder)
+
+    def test_focus_edge_replaces_the_removed_ring(self) -> None:
+        css = read(self.CHROME)
+        self.assertIn("--sheepfox-pill-border-focus", css)
+        self.assertIn('prefers-color-scheme: light', css)
+        self.assertIn('prefers-color-scheme: dark', css)
+        rule = css.split(') #urlbar-input::placeholder {')[0].split("#urlbar:is([focused=\"true\"], [open], [expanded]) {")[1]
+        self.assertIn("border-color: var(--sheepfox-pill-border-focus)", rule)
+
+    def test_small_windows_and_forced_colours(self) -> None:
+        css = read(self.CHROME)
+        self.assertIn("@media (max-height: 700px)", css)
+        self.assertIn("--sheepfox-pill-top: 34vh", css)
+        self.assertIn("@media (forced-colors: active)", css)
+        self.assertIn("CanvasText", css)
+
+    def test_no_shorthand_resets_a_longhand(self) -> None:
+        """Regression: `margin: 0 !important` came after `margin-inline: auto`
+        and silently un-centred the pill. Audit every rule for the pattern."""
+        shorthand_of = {
+            "margin": ("margin-inline", "margin-block", "margin-top", "margin-left"),
+            "padding": ("padding-inline", "padding-block", "padding-top"),
+            "border": ("border-color", "border-width", "border-radius"),
+            "background": ("background-color", "background-image"),
+            "font": ("font-size", "line-height"),
+            "inset": ("top", "left", "right", "bottom"),
+        }
+        for path in (self.CHROME, self.CONTENT):
+            css = self._declarations(read(path))
+            for rule in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
+                selector, body = rule.group(1).strip(), rule.group(2)
+                properties = re.findall(r"(?m)^\s*([a-z-]+)\s*:", body)
+                for index, prop in enumerate(properties):
+                    for shorthand, longs in shorthand_of.items():
+                        if prop != shorthand:
+                            continue
+                        earlier = set(properties[:index])
+                        clash = earlier.intersection(longs)
+                        self.assertFalse(
+                            clash,
+                            msg=f"{path.name}: `{shorthand}` after {sorted(clash)} in {selector}",
+                        )
 
     def test_stylesheet_imports_the_probe(self) -> None:
         css = read(self.CHROME)
@@ -442,7 +541,11 @@ class TestFloatingSearchUI(unittest.TestCase):
         css = read(self.CONTENT)
         self.assertIn('@-moz-document url("about:newtab"), url("about:home")', css)
         self.assertIn(".logo-and-wordmark", css, msg="wordmark must be cleared")
-        self.assertIn("padding-top", css, msg="shortcuts must be pushed below the pill")
+        # Derived from the pill geometry instead of a flat 56vh, which pushed the
+        # grid off the bottom of a short window and left a 120px gap on a tall one.
+        self.assertIn("padding-top: clamp(220px, calc(42vh + 56px), 60vh)", css)
+        self.assertIn("calc(34vh + 56px)", css)
+        self.assertIn(":focus-within .tile", css, msg="keyboard focus must be visible too")
 
     def test_installers_ship_the_ui(self) -> None:
         installer = read(REPO_ROOT / "scripts" / "install.py")
