@@ -14,11 +14,12 @@ user_pref("browser.ml.linkPreview.enabled", false);
 user_pref("extensions.ml.enabled", false);
 user_pref("extensions.htmlaboutaddons.local_model_management", false);
 
-// --- Remove Pocket, Sponsored Tiles & Mozilla Upsells ---
+// --- Remove Pocket, Sponsored Tiles & Mozilla/URLBar Upsells ---
 user_pref("extensions.pocket.enabled", false); // @lock
 user_pref("browser.newtabpage.activity-stream.showSponsored", false); // @lock
 user_pref("browser.newtabpage.activity-stream.showSponsoredTopSites", false); // @lock
 user_pref("browser.urlbar.suggest.quicksuggest.sponsored", false); // @lock
+user_pref("zen.urlbar.show-sponsored", false); // @lock
 user_pref("browser.newtabpage.activity-stream.feeds.telemetry", false); // @lock
 user_pref("browser.newtabpage.activity-stream.telemetry", false); // @lock
 user_pref("browser.newtabpage.activity-stream.feeds.section.topstories", false);

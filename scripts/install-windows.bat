@@ -1,6 +1,6 @@
 @echo off
 rem ===========================================================================
-rem (SheepFox) Firefox - Windows launcher
+rem (SheepFox) Zen browser - Windows launcher
 rem
 rem CRITICAL: Windows blocks unsigned PowerShell scripts by default, so this
 rem launcher starts PowerShell with -NoProfile -ExecutionPolicy Bypass. Users
@@ -8,7 +8,8 @@ rem therefore never hit "cannot be loaded because running scripts is disabled"
 rem or "not digitally signed" errors.
 rem
 rem Usage:
-rem   scripts\install-windows.bat               (installs the policy too, asks for UAC)
+rem   scripts\install-windows.bat               (targets Zen Browser + Firefox, asks for UAC)
+rem   scripts\install-windows.bat -Browser zen   (target Zen Browser only)
 rem   scripts\install-windows.bat -ProfileOnly   (profile only, no admin needed)
 rem   scripts\install-windows.bat -Strict
 rem   scripts\install-windows.bat -NoExtensions  (policy without uBlock/Decentraleyes)

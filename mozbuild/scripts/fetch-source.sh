@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# (SheepFox) Firefox — fetch and verify the pinned upstream Firefox sources
+# (SheepFox) Zen browser — fetch and verify the pinned upstream Firefox sources
 #
 #   ./mozbuild/scripts/fetch-source.sh [--force] [--dry-run]
 #

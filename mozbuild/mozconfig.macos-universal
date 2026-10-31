@@ -1,5 +1,5 @@
 # ============================================================================
-# (SheepFox) Firefox — macOS release mozconfig (Apple Silicon by default)
+# (SheepFox) Zen browser — macOS release mozconfig (Apple Silicon by default)
 #
 # Firefox has no single "build a universal app" configure switch; a universal2
 # .app is the lipo of two complete builds. This mozconfig builds one slice:

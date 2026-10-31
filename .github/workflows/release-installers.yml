@@ -126,7 +126,7 @@ jobs:
       - name: Publish the release
         uses: softprops/action-gh-release@v2
         with:
-          name: "(SheepFox) Firefox ${{ github.ref_name }}"
+          name: "(SheepFox) Zen browser ${{ github.ref_name }}"
           files: |
             artifacts/SheepFox-Setup-*.exe
             artifacts/SheepFox-*.dmg
@@ -134,11 +134,11 @@ jobs:
           fail_on_unmatched_files: true
           generate_release_notes: true
           body: |
-            Drop-in installers for (SheepFox) Firefox.
+            Drop-in installers for (SheepFox) Zen browser (supports Zen Browser and Mozilla Firefox).
 
             Both installers **preinstall uBlock Origin and Decentraleyes** through the
             SheepShields policy (`distribution/policies.json`), and ask for administrator
-            rights once because that file lives next to the Firefox binary. Use
+            rights once because that file lives next to the Zen Browser / Firefox binary. Use
             `-ProfileOnly` / `--profile` to skip it and install without admin, or
             `-NoExtensions` / `--no-extensions` to keep the policy but preinstall nothing.
 

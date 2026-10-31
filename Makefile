@@ -1,5 +1,5 @@
 # ============================================================================
-# (SheepFox) Firefox — unified build & configuration entry points
+# (SheepFox) Zen browser — unified build & configuration entry points
 # This Source Code Form is subject to the terms of the Mozilla Public License 2.0.
 # ============================================================================
 
@@ -12,18 +12,18 @@ SHEEPFOX_SRC ?= $(CURDIR)/mozbuild/firefox-src
         fetch-source patch-source build-browser clean verify
 
 help:
-	@echo "(SheepFox) Firefox — Project Commands"
-	@echo "======================================"
-	@echo "Drop-in config suite (works on stock Firefox):"
+	@echo "(SheepFox) Zen browser — Project Commands"
+	@echo "=========================================="
+	@echo "Drop-in config suite (works on Zen Browser and stock Firefox):"
 	@echo "  make build-configs   Compile config/modules/*.js -> user.js + sheepfox.cfg"
 	@echo "  make check           Verify the generated configs are in sync (CI gate)"
 	@echo "  make test            Run the full verification suite"
-	@echo "  make install         Apply SheepFox to the detected Firefox profile"
+	@echo "  make install         Apply SheepFox to the detected Zen Browser / Firefox profile"
 	@echo "  make install-dry-run Preview every path that would be touched"
 	@echo "  make installers      Build dist/SheepFox-Setup-*.exe + SheepFox-*.dmg + *.iso"
 	@echo "                       (needs: pip install ziglang pycdlib)"
 	@echo ""
-	@echo "Custom fork build (compile (SheepFox) Firefox from upstream source):"
+	@echo "Custom fork build (compile (SheepFox) Zen browser from upstream Gecko source):"
 	@echo "  make fetch-source    Download + SHA-512 verify the pinned Firefox source"
 	@echo "  make patch-source    Inject branding/policies and apply patches/series"
 	@echo "  make build-browser   ./mach configure && build && package  (TARGET=$(TARGET))"

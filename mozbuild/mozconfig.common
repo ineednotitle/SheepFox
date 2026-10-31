@@ -1,5 +1,5 @@
 # ============================================================================
-# (SheepFox) Firefox — shared mozconfig for every target
+# (SheepFox) Zen browser — shared mozconfig for every target
 # Consumed by mozbuild/scripts/build-browser.sh via the MOZCONFIG variable.
 #
 # Every `ac_add_options` below is a real Firefox 159.0 configure switch

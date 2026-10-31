@@ -1,8 +1,7 @@
 /* ============================================================================
-   (SheepFox) Firefox — userContent.css
-   Pairs with config/chrome/userChrome.css: the floating pill sits at ~42% of the
-   viewport, so the New Tab page is cleared out and its shortcuts move below it
-   — the Zen / Arc "search on an empty canvas" layout.
+   (SheepFox) Zen browser — userContent.css
+   Pairs with config/chrome/userChrome.css: clears Mozilla New Tab clutter and
+   gives about:newtab / about:home a clean Zen / Arc card layout.
 
    Installed to: <profile>/chrome/userContent.css
    Revert:       delete this file, or run the installer with --no-ui.

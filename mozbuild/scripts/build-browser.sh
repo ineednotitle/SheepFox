@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# (SheepFox) Firefox — compile a standalone branded SheepFox build
+# (SheepFox) Zen browser — compile a standalone branded SheepFox build
 #
 #   ./mozbuild/scripts/build-browser.sh [--target TARGET] [--no-package]
 #
