@@ -2,8 +2,11 @@
 # ============================================================================
 # (SheepFox) Firefox — Linux & macOS Quick Installer Wrapper
 # Usage:
-#   ./scripts/install-unix.sh              # Install user.js into default profile
-#   sudo ./scripts/install-unix.sh --system # Also install SheepShields policies & AutoConfig
+#   ./scripts/install-unix.sh             # user.js + floating UI + SheepShields policy
+#                                         #   (the policy preinstalls uBlock Origin and
+#                                         #    Decentraleyes; it asks for sudo once)
+#   sudo ./scripts/install-unix.sh --system    # also the AutoConfig files
+#   ./scripts/install-unix.sh --no-extensions  # policy without the extension preinstall
 # ============================================================================
 set -euo pipefail
 

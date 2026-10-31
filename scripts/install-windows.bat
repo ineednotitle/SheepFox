@@ -8,10 +8,11 @@ rem therefore never hit "cannot be loaded because running scripts is disabled"
 rem or "not digitally signed" errors.
 rem
 rem Usage:
-rem   scripts\install-windows.bat
-rem   scripts\install-windows.bat -System
-rem   scripts\install-windows.bat -System -Strict
-rem   scripts\install-windows.bat -Uninstall -System
+rem   scripts\install-windows.bat               (installs the policy too, asks for UAC)
+rem   scripts\install-windows.bat -ProfileOnly   (profile only, no admin needed)
+rem   scripts\install-windows.bat -Strict
+rem   scripts\install-windows.bat -NoExtensions  (policy without uBlock/Decentraleyes)
+rem   scripts\install-windows.bat -Uninstall
 rem ===========================================================================
 setlocal
 

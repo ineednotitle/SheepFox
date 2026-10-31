@@ -9,7 +9,11 @@
 # unidentified developer", or the file has no execute bit on a mounted image):
 #   Control-click → Open,  or run:  sh "Install SheepFox.command"
 #
+# macOS will ask for your password once: the SheepShields policy file that
+# preinstalls uBlock Origin + Decentraleyes lives inside Firefox.app.
+#
 # Switches are forwarded, so you can also do:
+#   sh "Install SheepFox.command" --no-extensions
 #   sh "Install SheepFox.command" --system --low-memory
 #   sh "Install SheepFox.command" --doctor
 #   sh "Install SheepFox.command" --uninstall
@@ -63,6 +67,7 @@ if sh ./scripts/install-unix.sh "$@"; then
   echo ""
   echo "  Done. Start Firefox, then press Cmd+T."
   echo "  Floating search pill, privacy prefs and speed prefs are active."
+  echo "  uBlock Origin + Decentraleyes install on that first start."
 else
   status=$?
   echo ""

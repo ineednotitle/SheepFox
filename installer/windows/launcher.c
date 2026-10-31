@@ -6,6 +6,10 @@
    (`zig cc -target x86_64-windows-gnu`) and links in `payload.c`, which is the
    whole SheepFox payload as a byte array.
 
+   The install preinstalls uBlock Origin + Decentraleyes through
+   distribution\policies.json, so it asks for UAC like any other installer.
+   -ProfileOnly keeps everything inside the profile.
+
    What it does at run time, in order:
      1. writes the embedded payload zip to %TEMP%\sheepfox-setup\
      2. expands it with PowerShell's Expand-Archive
@@ -108,7 +112,9 @@ int main(int argc, char **argv) {
         strcmp(argv[index], "--help") == 0) {
       say("Usage: SheepFox-Setup.exe [installer switches]");
       say("");
-      say("  -System       also install policies.json + AutoConfig (needs admin)");
+      say("  -ProfileOnly  profile only: no extension preinstall, no admin needed");
+      say("  -NoExtensions install the policy but preinstall nothing");
+      say("  -System       install the policy + AutoConfig (default; asks for UAC)");
       say("  -Strict       add the strict anti-fingerprinting overrides");
       say("  -LowMemory    minimal-RAM profile (turns Fission isolation off)");
       say("  -NoUI         skip the floating-search theme");

@@ -4,16 +4,26 @@
 
 .DESCRIPTION
   Installs the SheepFox speed + privacy suite into a real Firefox profile
-  (user.js) and, with -System, installs the AutoConfig (sheepfox.cfg +
-  defaults\pref\local-settings.js) and the SheepShields enterprise policy
-  (distribution\policies.json, which auto-installs uBlock Origin).
+  (user.js) and the SheepShields enterprise policy
+  (distribution\policies.json), which preinstalls uBlock Origin and
+  Decentraleyes when Firefox next starts. -System additionally installs the
+  AutoConfig files (sheepfox.cfg + defaults\pref\local-settings.js).
 
   All text files are written as BOM-free UTF-8: Firefox's AutoConfig loader
   and its JSON parser must never see a byte-order mark.
 
 .PARAMETER System
-  Also install AutoConfig + policies into the Firefox installation directory.
+  Install the policy + AutoConfig into the Firefox installation directory.
+  On by default - use -ProfileOnly to keep everything inside the profile.
   Automatically re-launches itself elevated (UAC) when needed.
+
+.PARAMETER ProfileOnly
+  Only touch the Firefox profile: no policies.json, so uBlock Origin and
+  Decentraleyes are not preinstalled. Needs no administrator rights.
+
+.PARAMETER NoExtensions
+  Install the SheepShields policy but drop the uBlock Origin + Decentraleyes
+  entries, so nothing is preinstalled.
 
 .PARAMETER Strict
   Append config\overrides\strict-paranoia.override.js (strict RFP (ResistFingerprinting) mode).
@@ -67,6 +77,8 @@
 [CmdletBinding()]
 param(
     [switch]$System,
+    [switch]$ProfileOnly,
+    [switch]$NoExtensions,
     [switch]$Strict,
     [switch]$Uninstall,
     [switch]$DryRun,
@@ -100,6 +112,12 @@ if ($RemainingArguments -and $RemainingArguments.Count -gt 0) {
     Write-Host "          .\scripts\install-windows.bat -System -Strict" -ForegroundColor Gray
     Write-Host "          .\scripts\install-windows.bat -Uninstall -System" -ForegroundColor Gray
     exit 2
+}
+
+# A normal install includes the SheepShields policy: that is what preinstalls
+# uBlock Origin and Decentraleyes. -ProfileOnly opts out (and needs no UAC).
+if (-not ($ProfileOnly -or $Doctor -or $DryRun -or $Probe -or $Unprobe -or $Report)) {
+    $System = $true
 }
 
 # --------------------------------------------------------------------------
@@ -294,6 +312,7 @@ if ($System -and -not (Test-IsAdmin) -and -not $DryRun -and -not $Doctor) {
     if ($NoUI) { $argumentList += "-NoUI" }
     if ($LowMemory) { $argumentList += "-LowMemory" }
     if ($Uninstall) { $argumentList += "-Uninstall" }
+    if ($NoExtensions) { $argumentList += "-NoExtensions" }
     if ($ProfilePath) { $argumentList += @("-ProfilePath", "`"$ProfilePath`"") }
     if ($FirefoxDir) { $argumentList += @("-FirefoxDir", "`"$FirefoxDir`"") }
 
@@ -504,8 +523,27 @@ if ($Doctor) {
         }
         if ($installed.Count -eq 0) {
             Write-SheepFox "  [info] no system install here (-System is optional):" "Gray"
-            Write-SheepFox "         policies.json + AutoConfig are what lock uBlock Origin and the shields." "Gray"
+            Write-SheepFox "         policies.json preinstalls uBlock Origin + Decentraleyes and locks the shields." "Gray"
             Write-SheepFox "         add them with:  .\scripts\install-windows.bat -System" "Gray"
+        }
+        $policiesFile = Join-Path $FirefoxDir "distribution\policies.json"
+        if (Test-Path $policiesFile) {
+            try {
+                $policyObject = [System.IO.File]::ReadAllText($policiesFile) | ConvertFrom-Json
+                $configured = @($policyObject.policies.ExtensionSettings.PSObject.Properties | ForEach-Object { $_.Name })
+                $missing = @()
+                foreach ($extensionId in @("uBlock0@raymondhill.net", "jid1-BoFifL9Vbdl2zQ@jetpack")) {
+                    if ($configured -notcontains $extensionId) { $missing += $extensionId }
+                }
+                if ($missing.Count -gt 0) {
+                    Write-SheepFox "  [info] extension preinstall skipped for: $($missing -join ', ')" "Gray"
+                    Write-SheepFox "         re-run the installer without -NoExtensions to add them" "Gray"
+                } else {
+                    Report-Check $true "extension preinstall (uBlock Origin + Decentraleyes)"
+                }
+            } catch {
+                Report-Check $false "distribution\policies.json parses" "$($_.Exception.Message)"
+            }
         }
     }
 
@@ -629,20 +667,36 @@ if ($System) {
     $localSettingsTarget = Join-Path $FirefoxDir "defaults\pref\local-settings.js"
     $policiesTarget = Join-Path $FirefoxDir "distribution\policies.json"
 
+    $policiesText = [System.IO.File]::ReadAllText($PoliciesSrc)
+    if ($NoExtensions) {
+        $policiesObject = $policiesText | ConvertFrom-Json
+        foreach ($extensionId in @("uBlock0@raymondhill.net", "jid1-BoFifL9Vbdl2zQ@jetpack")) {
+            $policiesObject.policies.ExtensionSettings.PSObject.Properties.Remove($extensionId)
+            if ($policiesObject.policies.'3rdparty'.Extensions) {
+                $policiesObject.policies.'3rdparty'.Extensions.PSObject.Properties.Remove($extensionId)
+            }
+        }
+        $policiesText = $policiesObject | ConvertTo-Json -Depth 32
+    }
+
     if ($DryRun) {
         Write-SheepFox "  [dry-run] would write $cfgTarget"
         Write-SheepFox "  [dry-run] would write $localSettingsTarget"
         Write-SheepFox "  [dry-run] would write $policiesTarget"
     } else {
-        foreach ($pair in @(
-                @{ Source = $AutoCfgSrc; Target = $cfgTarget },
-                @{ Source = $LocalSettingsSrc; Target = $localSettingsTarget },
-                @{ Source = $PoliciesSrc; Target = $policiesTarget })) {
-            Backup-ExistingFile -Path $pair.Target
-            Write-Utf8NoBom -Path $pair.Target -Content ([System.IO.File]::ReadAllText($pair.Source))
-            Write-SheepFox "  [ok] installed $($pair.Target)" "Green"
+        foreach ($item in @(
+                @{ Text = [System.IO.File]::ReadAllText($AutoCfgSrc); Target = $cfgTarget },
+                @{ Text = [System.IO.File]::ReadAllText($LocalSettingsSrc); Target = $localSettingsTarget },
+                @{ Text = $policiesText; Target = $policiesTarget })) {
+            Backup-ExistingFile -Path $item.Target
+            Write-Utf8NoBom -Path $item.Target -Content $item.Text
+            Write-SheepFox "  [ok] installed $($item.Target)" "Green"
         }
-        Write-SheepFox "  [ok] SheepShields policy will auto-install uBlock Origin on next start" "Green"
+        if ($NoExtensions) {
+            Write-SheepFox "  [ok] SheepShields policy installed (-NoExtensions: nothing preinstalled)" "Green"
+        } else {
+            Write-SheepFox "  [ok] SheepShields policy preinstalls uBlock Origin + Decentraleyes on next start" "Green"
+        }
     }
 }
 

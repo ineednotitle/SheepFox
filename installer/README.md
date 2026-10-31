@@ -11,8 +11,13 @@ The source of the two artifacts published on every `v*` tag:
 Nothing is re-implemented inside an installer. Both launchers unpack the payload
 (a copy of `scripts/`, `config/` and `LICENSE`/`README.md`) and then run the same
 script a git checkout runs, forwarding every switch, so `--strict`, `--no-ui`,
-`--uninstall`, `--low-memory`, `--dry-run`, `--doctor`, `--probe` and `--report`
-behave identically however you installed SheepFox.
+`--no-extensions`, `--uninstall`, `--low-memory`, `--dry-run`, `--doctor`,
+`--probe` and `--report` behave identically however you installed SheepFox.
+
+Both ask for administrator rights exactly once: the SheepShields policy goes next
+to the Firefox binary, and that policy is what preinstalls **uBlock Origin and
+Decentraleyes**. `-ProfileOnly` / `--profile` keeps the install inside the
+profile (no admin, no extension preinstall).
 
 ## Build them
 
@@ -41,10 +46,13 @@ byte array, so the target machine needs no toolchain. At run time it:
 3. runs `payload\scripts\install-windows.ps1` with your switches, and
 4. exits with that script's exit code.
 
-`SheepFox-Setup.exe /?` prints the switch list. No registry writes, no services,
-no background processes, no downloads. `-System` still elevates through UAC by
-itself, and the launcher always passes `-NoProfile -ExecutionPolicy Bypass`, so
-an ExecutionPolicy error is impossible.
+`SheepFox-Setup.exe /?` prints the switch list (`-ProfileOnly`, `-NoExtensions`,
+`-System`, `-Strict`, `-LowMemory`, `-NoUI`, `-Doctor`, `-Probe`, `-Unprobe`,
+`-Report`, `-Uninstall`, `-DryRun`). Elevation is handled by
+`install-windows.ps1`: it re-launches itself through UAC, so there is no "run as
+administrator" step. No registry writes, no services, no background processes,
+no downloads, and the launcher always passes `-NoProfile -ExecutionPolicy
+Bypass`, so an ExecutionPolicy error is impossible.
 
 ## macOS
 

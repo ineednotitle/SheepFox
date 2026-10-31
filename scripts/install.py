@@ -5,8 +5,9 @@ Applies SheepFox speed & privacy configurations to stock Mozilla Firefox:
   1. Per-profile `user.js` (+ optional personal or `--strict` overrides)
   2. Per-profile UI theme: `chrome/userChrome.css` + `chrome/userContent.css`
      (the floating Zen/Arc-style new-tab search pill; skip with --no-ui)
-  3. Optional `--system` AutoConfig (`sheepfox.cfg` + `local-settings.js`)
-     and SheepShields Enterprise Policy (`distribution/policies.json` with uBlock Origin)
+  3. SheepShields Enterprise Policy (`distribution/policies.json`), which
+     preinstalls uBlock Origin + Decentraleyes and locks the privacy defaults
+  4. Optional `--system` AutoConfig (`sheepfox.cfg` + `local-settings.js`)
 """
 
 from __future__ import annotations
@@ -16,10 +17,13 @@ import configparser
 import hashlib
 import json
 import os
-import re
 import platform
+import re
+import shlex
 import shutil
+import subprocess
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -34,6 +38,12 @@ LOCAL_SETTINGS_SRC = REPO_ROOT / "config" / "autoconfig" / "defaults" / "pref" /
 CHROME_SRC_DIR = REPO_ROOT / "config" / "chrome"
 #: Profile-level CSS: the floating new-tab search pill (Zen/Arc style)
 UI_FILES = ("userChrome.css", "userContent.css")
+#: Extensions SheepShields preinstalls through the policy file. The names are
+#: only used for the human-readable log lines.
+SHEEPFOX_EXTENSIONS = {
+    "uBlock0@raymondhill.net": "uBlock Origin",
+    "jid1-BoFifL9Vbdl2zQ@jetpack": "Decentraleyes",
+}
 #: Optional probe that userChrome.css @imports; proves the stylesheet is read.
 PROBE_FILE = "sheepfox-probe.css"
 PROBE_CSS = """/* (SheepFox) CSS load probe.
@@ -333,8 +343,23 @@ def doctor(profile_dir: Path | None, firefox_dir: Path | None) -> int:
             report(True, f"system {rel}")
         if not installed:
             print("  [info] no system install here (--system is optional):")
-            print("         policies.json + AutoConfig are what lock uBlock Origin and the shields.")
+            print("         policies.json preinstalls uBlock Origin + Decentraleyes and locks the shields.")
             print("         add them with:  python3 scripts/install.py --system")
+        policy_file = firefox_dir / "distribution" / "policies.json"
+        if policy_file.is_file():
+            try:
+                policy_data = json.loads(policy_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as error:
+                print(f"  [FAIL] distribution/policies.json parses -> {error}")
+                failures += 1
+            else:
+                ids = set(policy_data.get("policies", {}).get("ExtensionSettings", {}))
+                missing = [name for extension_id, name in SHEEPFOX_EXTENSIONS.items() if extension_id not in ids]
+                if missing:
+                    print(f"  [info] extension preinstall skipped for: {', '.join(missing)}")
+                    print("         re-run the installer without --no-extensions to add them")
+                else:
+                    report(True, "extension preinstall (uBlock Origin + Decentraleyes)")
 
     print()
     if failures:
@@ -366,6 +391,75 @@ def compose_user_js(strict: bool, low_memory: bool = False) -> str:
     return content.rstrip() + "\n"
 
 
+def render_policies(include_extensions: bool = True) -> str:
+    """The SheepShields policy, optionally without the extension entries."""
+    policy = json.loads(POLICIES_SRC.read_text(encoding="utf-8"))
+    if not include_extensions:
+        settings = policy["policies"].get("ExtensionSettings", {})
+        for extension_id in SHEEPFOX_EXTENSIONS:
+            settings.pop(extension_id, None)
+        managed = policy["policies"].get("3rdparty", {}).get("Extensions", {})
+        for extension_id in SHEEPFOX_EXTENSIONS:
+            managed.pop(extension_id, None)
+    return json.dumps(policy, indent=2, ensure_ascii=False) + "\n"
+
+
+def _elevated_copy(target: Path, content: str) -> bool:
+    """Install *target* with administrator rights, staging it as the user first.
+
+    Returns False when no elevation path is available, so the caller can print an
+    actionable instruction instead of raising.
+    """
+    staged = Path(tempfile.mkdtemp(prefix="sheepfox-policy-")) / target.name
+    staged.write_text(content, encoding="utf-8")
+    parent = shlex.quote(str(target.parent))
+    source = shlex.quote(str(staged))
+    destination = shlex.quote(str(target))
+
+    if sys.platform == "darwin" and shutil.which("osascript"):
+        script = f"/bin/mkdir -p {parent} && /bin/cp {source} {destination} && /bin/chmod 644 {destination}"
+        result = subprocess.run(
+            ["osascript", "-e", f'do shell script "{script}" with administrator privileges'],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return result.returncode == 0
+
+    if shutil.which("sudo") and sys.stdin.isatty():
+        result = subprocess.run(
+            ["sudo", "install", "-D", "-m", "644", str(staged), str(target)],
+            check=False,
+        )
+        return result.returncode == 0
+    return False
+
+
+def install_policy(firefox_dir: Path, include_extensions: bool, dry_run: bool) -> bool:
+    """Write <firefox>/distribution/policies.json, elevating only if needed."""
+    target = firefox_dir / "distribution" / "policies.json"
+    content = render_policies(include_extensions)
+    if dry_run:
+        print(f"  [DRY-RUN] Would write {target} ({len(content)} bytes)")
+        return True
+    try:
+        backup_and_write(target, content, dry_run=False)
+    except (PermissionError, OSError):
+        if not _elevated_copy(target, content):
+            print(f"  [WARN]   Could not write {target} (administrator rights required).")
+            print("           Run the installer once as an administrator:")
+            print("             sudo python3 scripts/install.py --system")
+            print(f"           or copy distribution/policies.json into {firefox_dir}")
+            return False
+        print(f"  [WRITE]  Installed {target} (as administrator)")
+    if include_extensions:
+        names = " + ".join(SHEEPFOX_EXTENSIONS.values())
+        print(f"  [OK]     SheepShields policy preinstalls {names} on the next start")
+    else:
+        print("  [SKIP]   Extension preinstall disabled (--no-extensions)")
+    return True
+
+
 def backup_and_write(dest: Path, content: str, dry_run: bool) -> None:
     if dry_run:
         print(f"  [DRY-RUN] Would write {dest} ({len(content)} bytes)")
@@ -395,7 +489,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Install (SheepFox) Firefox speed & privacy suite.")
     parser.add_argument("--profile", type=Path, help="Explicit path to target Firefox profile directory.")
     parser.add_argument("--firefox-dir", type=Path, help="Explicit path to Firefox binary installation folder.")
-    parser.add_argument("--system", action="store_true", help="Also install policies.json (uBlock Origin) & AutoConfig.")
+    parser.add_argument(
+        "--system",
+        action="store_true",
+        help="Also install the AutoConfig files (the SheepShields policy is installed anyway).",
+    )
+    parser.add_argument(
+        "--no-extensions",
+        dest="extensions",
+        action="store_false",
+        help="Do not preinstall uBlock Origin + Decentraleyes (keeps the rest of the policy).",
+    )
     parser.add_argument("--strict", action="store_true", help="Append strict anti-fingerprinting (RFP) overrides.")
     parser.add_argument(
         "--low-memory",
@@ -562,11 +666,16 @@ def main() -> int:
             LOCAL_SETTINGS_SRC.read_text(encoding="utf-8"),
             args.dry_run,
         )
-        backup_and_write(
-            firefox_dir / "distribution" / "policies.json",
-            POLICIES_SRC.read_text(encoding="utf-8"),
-            args.dry_run,
-        )
+
+    # The SheepShields policy is what preinstalls uBlock Origin + Decentraleyes,
+    # so it is part of a normal install - not something to discover later. A
+    # --profile run means "this profile only" and stays off the system tree.
+    if args.system or not args.profile:
+        if firefox_dir:
+            install_policy(firefox_dir, include_extensions=args.extensions, dry_run=args.dry_run)
+        else:
+            print("  [info]   Firefox installation directory not found; extension preinstall skipped.")
+            print("           uBlock Origin + Decentraleyes arrive on the next start once Firefox is installed.")
 
     print("\n[DONE] Restart Firefox to activate (SheepFox) speed & privacy protections!")
     return 0

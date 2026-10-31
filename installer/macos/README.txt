@@ -16,14 +16,18 @@ What gets installed
   ~/Library/Application Support/Firefox/Profiles/<your profile>/user.js
   ~/Library/Application Support/Firefox/Profiles/<your profile>/chrome/userChrome.css
   ~/Library/Application Support/Firefox/Profiles/<your profile>/chrome/userContent.css
+  /Applications/Firefox.app/Contents/Resources/distribution/policies.json
 
-Nothing else is touched. Every profile found is updated, so it works whatever
-profile Firefox actually opens.
+The policy file is what preinstalls uBlock Origin and Decentraleyes, so macOS
+asks for your admin password once. Say no and the theme and preferences still
+install; only the extensions wait. Every profile found is updated, so it works
+whatever profile Firefox actually opens.
 
 Useful switches
 ---------------
   sh "Install SheepFox.command" --doctor        diagnose an install
   sh "Install SheepFox.command" --probe         red toolbar = the CSS is loading
+  sh "Install SheepFox.command" --no-extensions policy without uBlock/Decentraleyes
   sh "Install SheepFox.command" --report r.txt  write a full report
   sh "Install SheepFox.command" --low-memory    minimal RAM (turns Fission off)
   sh "Install SheepFox.command" --no-ui         everything except the UI theme

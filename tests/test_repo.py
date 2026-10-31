@@ -483,12 +483,195 @@ class TestPolicies(unittest.TestCase):
         self.assertTrue(ublock["install_url"].startswith("https://addons.mozilla.org/"))
         self.assertTrue(ublock["install_url"].endswith(".xpi"))
 
+    def test_decentraleyes_extension(self) -> None:
+        settings = self.data["ExtensionSettings"]
+        decentraleyes = settings["jid1-BoFifL9Vbdl2zQ@jetpack"]
+        self.assertEqual(decentraleyes["installation_mode"], "normal_installed")
+        self.assertEqual(
+            decentraleyes["install_url"],
+            "https://addons.mozilla.org/firefox/downloads/latest/decentraleyes/latest.xpi",
+        )
+        self.assertIs(decentraleyes["private_browsing"], True)
+        # Both extensions stay removable: a policy must never trap the user.
+        for extension_id in ("uBlock0@raymondhill.net", "jid1-BoFifL9Vbdl2zQ@jetpack"):
+            self.assertEqual(settings[extension_id]["installation_mode"], "normal_installed")
+
     def test_curated_filter_lists(self) -> None:
         lists = self.data["3rdparty"]["Extensions"]["uBlock0@raymondhill.net"]["toOverwrite"][
             "filterLists"
         ]
         for required in ("easylist", "easyprivacy", "ublock-badware", "ublock-privacy", "urlhaus-1"):
             self.assertIn(required, lists)
+
+
+class TestExtensionPreinstall(unittest.TestCase):
+    """uBlock Origin + Decentraleyes must arrive without the user hunting for them."""
+
+    INSTALLER = REPO_ROOT / "scripts" / "install.py"
+
+    @staticmethod
+    def _module():
+        spec = importlib.util.spec_from_file_location("sheepfox_install", TestExtensionPreinstall.INSTALLER)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_render_policies_keeps_both_extensions(self) -> None:
+        policy = json.loads(self._module().render_policies(True))["policies"]
+        settings = policy["ExtensionSettings"]
+        self.assertIn("uBlock0@raymondhill.net", settings)
+        self.assertIn("jid1-BoFifL9Vbdl2zQ@jetpack", settings)
+
+    def test_render_policies_can_skip_the_extensions(self) -> None:
+        policy = json.loads(self._module().render_policies(False))["policies"]
+        settings = policy["ExtensionSettings"]
+        self.assertEqual(set(settings), {"*"}, msg="only the wildcard should remain")
+        self.assertNotIn("uBlock0@raymondhill.net", policy.get("3rdparty", {}).get("Extensions", {}))
+        # Everything else still applies: this is an opt-out, not a cancel.
+        self.assertIs(policy["DisableTelemetry"], True)
+        self.assertEqual(policy["HttpsOnlyMode"], "enabled")
+
+    def test_system_install_writes_the_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "profile"
+            profile.mkdir()
+            firefox_dir = Path(tmp) / "firefox"
+            firefox_dir.mkdir()
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(self.INSTALLER),
+                    "--profile",
+                    str(profile),
+                    "--system",
+                    "--firefox-dir",
+                    str(firefox_dir),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+            written = json.loads((firefox_dir / "distribution" / "policies.json").read_text(encoding="utf-8"))
+            self.assertIn("jid1-BoFifL9Vbdl2zQ@jetpack", written["policies"]["ExtensionSettings"])
+            self.assertIn("uBlock Origin + Decentraleyes", result.stdout)
+
+    def test_no_extensions_flag_keeps_the_rest_of_the_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "profile"
+            profile.mkdir()
+            firefox_dir = Path(tmp) / "firefox"
+            firefox_dir.mkdir()
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(self.INSTALLER),
+                    "--profile",
+                    str(profile),
+                    "--system",
+                    "--firefox-dir",
+                    str(firefox_dir),
+                    "--no-extensions",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+            written = json.loads((firefox_dir / "distribution" / "policies.json").read_text(encoding="utf-8"))
+            self.assertEqual(set(written["policies"]["ExtensionSettings"]), {"*"})
+            self.assertIs(written["policies"]["DisableTelemetry"], True)
+
+    def test_a_plain_run_installs_the_policy_too(self) -> None:
+        """No --profile: the extensions ride along without any extra switch."""
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            profile = home / ".mozilla" / "firefox" / "abc123.default-release"
+            profile.mkdir(parents=True)
+            (home / ".mozilla" / "firefox" / "profiles.ini").write_text(
+                "[Profile0]\nName=default-release\nIsRelative=1\nPath=abc123.default-release\nDefault=1\n",
+                encoding="utf-8",
+            )
+            firefox_dir = Path(tmp) / "firefox"
+            firefox_dir.mkdir()
+            environment = dict(os.environ, HOME=str(home))
+            result = subprocess.run(
+                [sys.executable, str(self.INSTALLER), "--firefox-dir", str(firefox_dir)],
+                capture_output=True,
+                text=True,
+                check=False,
+                env=environment,
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+            written = firefox_dir / "distribution" / "policies.json"
+            self.assertTrue(written.is_file(), msg=result.stdout)
+            policy = json.loads(written.read_text(encoding="utf-8"))["policies"]
+            self.assertIn("uBlock0@raymondhill.net", policy["ExtensionSettings"])
+            self.assertIn("jid1-BoFifL9Vbdl2zQ@jetpack", policy["ExtensionSettings"])
+            # The CSS still landed in the detected profile.
+            self.assertTrue((profile / "chrome" / "userChrome.css").is_file())
+
+    def test_doctor_reports_the_extension_preinstall(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "profile"
+            profile.mkdir()
+            firefox_dir = Path(tmp) / "firefox"
+            firefox_dir.mkdir()
+            subprocess.run(
+                [sys.executable, str(self.INSTALLER), "--profile", str(profile), "--system", "--firefox-dir", str(firefox_dir)],
+                capture_output=True,
+                check=True,
+            )
+            result = subprocess.run(
+                [sys.executable, str(self.INSTALLER), "--profile", str(profile), "--firefox-dir", str(firefox_dir), "--doctor"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+            self.assertIn("[OK  ] extension preinstall (uBlock Origin + Decentraleyes)", result.stdout)
+
+    def test_doctor_stays_green_when_extensions_are_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "profile"
+            profile.mkdir()
+            firefox_dir = Path(tmp) / "firefox"
+            firefox_dir.mkdir()
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(self.INSTALLER),
+                    "--profile",
+                    str(profile),
+                    "--system",
+                    "--firefox-dir",
+                    str(firefox_dir),
+                    "--no-extensions",
+                ],
+                capture_output=True,
+                check=True,
+            )
+            result = subprocess.run(
+                [sys.executable, str(self.INSTALLER), "--profile", str(profile), "--firefox-dir", str(firefox_dir), "--doctor"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+            self.assertIn("extension preinstall skipped for: uBlock Origin, Decentraleyes", result.stdout)
+            self.assertNotIn("[FAIL]", result.stdout)
+
+    def test_windows_installer_defaults_to_the_policy(self) -> None:
+        ps1 = read(REPO_ROOT / "scripts" / "install-windows.ps1")
+        self.assertIn("[switch]$ProfileOnly", ps1)
+        self.assertIn("[switch]$NoExtensions", ps1)
+        self.assertIn("$System = $true", ps1, msg="-System must default on for real installs")
+        self.assertIn("-ProfileOnly", ps1)
+        self.assertIn("uBlock Origin + Decentraleyes", ps1)
+        self.assertIn("jid1-BoFifL9Vbdl2zQ@jetpack", ps1)
+        launcher = read(REPO_ROOT / "installer" / "windows" / "launcher.c")
+        self.assertIn("-ProfileOnly", launcher)
+        self.assertIn("-NoExtensions", launcher)
 
 
 class TestBranding(unittest.TestCase):

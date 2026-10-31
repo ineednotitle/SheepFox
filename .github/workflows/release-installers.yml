@@ -136,16 +136,24 @@ jobs:
           body: |
             Drop-in installers for (SheepFox) Firefox.
 
+            Both installers **preinstall uBlock Origin and Decentraleyes** through the
+            SheepShields policy (`distribution/policies.json`), and ask for administrator
+            rights once because that file lives next to the Firefox binary. Use
+            `-ProfileOnly` / `--profile` to skip it and install without admin, or
+            `-NoExtensions` / `--no-extensions` to keep the policy but preinstall nothing.
+
             * **Windows** — `SheepFox-Setup-<version>.exe`. Double-click it. It unpacks
               the payload to `%TEMP%\sheepfox-setup` and runs the same
-              `scripts\install-windows.ps1` a git checkout would run, so `-System`,
-              `-Strict`, `-NoUI`, `-LowMemory`, `-Uninstall`, `-DryRun`, `-Unprobe`,
-              `-Report` and `-Doctor` all work. `SheepFox-Setup.exe /?` lists them.
+              `scripts\install-windows.ps1` a git checkout would run, so `-ProfileOnly`,
+              `-NoExtensions`, `-System`, `-Strict`, `-NoUI`, `-LowMemory`, `-Uninstall`,
+              `-DryRun`, `-Unprobe`, `-Report` and `-Doctor` all work.
+              `SheepFox-Setup.exe /?` lists them.
             * **macOS** — `SheepFox-<version>.dmg`. Open it, then double-click
               **Install SheepFox.command**. Gatekeeper may need
               *System Settings -> Privacy & Security -> Open Anyway* for an unsigned
-              build; the same `--strict / --no-ui / --uninstall / --low-memory /
-              --dry-run / --doctor / --probe / --report` switches apply.
+              build; the same `--profile / --no-extensions / --strict / --no-ui /
+              --uninstall / --low-memory / --dry-run / --doctor / --probe / --report`
+              switches apply.
             * **Fallback** — `SheepFox-<version>.iso`. Identical contents for hosts
               that will not mount the UDIF image.
 

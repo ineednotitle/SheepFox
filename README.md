@@ -33,7 +33,7 @@ SheepFox gives you both halves, in one repository, in two independent modes:
 
 | | What it gives you | Works on |
 | :--- | :--- | :--- |
-| **Mode 1 — Drop-in suite** | Modular prefs → `user.js`, a system AutoConfig (`sheepfox.cfg`), and **SheepShields** enterprise policy that auto-installs uBlock Origin with curated filter lists | Any stock Firefox on Windows, Linux, macOS (standard, Flatpak, Snap) |
+| **Mode 1 — Drop-in suite** | Modular prefs → `user.js`, a system AutoConfig (`sheepfox.cfg`), and **SheepShields** enterprise policy that preinstalls **uBlock Origin + Decentraleyes** | Any stock Firefox on Windows, Linux, macOS (standard, Flatpak, Snap) |
 | **Mode 2 — Fork scaffold** | Branding, mozconfigs, a verified patch series and CI to compile a standalone **SheepFox** binary from pinned Mozilla source with cross-language LTO, `x86-64-v3`, LLD and optional PGO | Build host: Linux / Windows (MozillaBuild) / macOS |
 
 Mode 1 takes about ten seconds. Mode 2 takes about an hour of CPU and 40 GB of disk.
@@ -126,8 +126,12 @@ Backups of any existing `user.js` are written first (`user.js.sheepfox-backup-<t
 git clone https://github.com/ineednotitle/SheepFox.git && cd SheepFox
 ./scripts/install-unix.sh --dry-run      # preview every path first
 
-./scripts/install-unix.sh                # profile only: speed + privacy user.js
-sudo ./scripts/install-unix.sh --system  # + AutoConfig + SheepShields (uBlock Origin)
+./scripts/install-unix.sh                # user.js + floating CSS + SheepShields policy
+                                         #   (asks for sudo once: the policy lives next to the
+                                         #    Firefox binary, and that is what preinstalls
+                                         #    uBlock Origin + Decentraleyes)
+sudo ./scripts/install-unix.sh --system  # same, plus the AutoConfig files
+./scripts/install-unix.sh --no-extensions  # policy without the extension preinstall
 ```
 
 Flatpak (`~/.var/app/org.mozilla.firefox/...`) and Snap (`~/snap/firefox/common/...`) profiles
@@ -138,8 +142,8 @@ are detected automatically; system dirs for both are probed for `--system`.
 ```bash
 git clone https://github.com/ineednotitle/SheepFox.git && cd SheepFox
 ./scripts/install-unix.sh --dry-run
-./scripts/install-unix.sh                            # ~/Library/Application Support/Firefox
-sudo ./scripts/install-unix.sh --system              # + /Applications/Firefox.app/Contents/Resources
+./scripts/install-unix.sh            # profiles + policy (macOS asks for the admin password once)
+sudo ./scripts/install-unix.sh --system   # + AutoConfig in /Applications/Firefox.app/Contents/Resources
 ```
 
 ### Windows
@@ -148,9 +152,11 @@ Double-click or run the `.bat` launcher — it bypasses `ExecutionPolicy` for yo
 never see *"…install-windows.ps1 is not digitally signed"*:
 
 ```powershell
-.\scripts\install-windows.bat                       # profile only: speed + privacy
-.\scripts\install-windows.bat -System -Strict        # + AutoConfig/uBlock (UAC) and strict RFP
-.\scripts\install-windows.bat -Uninstall -System     # remove everything again
+.\scripts\install-windows.bat                  # user.js + CSS + policy (asks for UAC once)
+.\scripts\install-windows.bat -ProfileOnly     # profile only: no policy, no admin needed
+.\scripts\install-windows.bat -Strict          # same, plus strict anti-fingerprinting
+.\scripts\install-windows.bat -NoExtensions    # policy, but preinstall no extensions
+.\scripts\install-windows.bat -Uninstall       # remove everything again
 ```
 
 > **Windows notes**
@@ -176,8 +182,35 @@ Cross-platform alternative:
 ```powershell
 python scripts\install.py --dry-run
 python scripts\install.py --strict
+python scripts\install.py --no-extensions
 python scripts\install.py --system --uninstall
 ```
+
+### The two extensions: uBlock Origin + Decentraleyes
+
+Both are preinstalled for you, in every mode, with no trip to addons.mozilla.org. They arrive
+through **SheepShields**, the Enterprise Policy file (`distribution/policies.json`) that the
+installer writes next to the Firefox binary:
+
+| Extension | ID | Why it is here |
+| :--- | :--- | :--- |
+| uBlock Origin | `uBlock0@raymondhill.net` | Blocks ads/trackers with the curated list set in `3rdparty`; the single biggest speed and privacy win |
+| Decentraleyes | `jid1-BoFifL9Vbdl2zQ@jetpack` | Serves the common CDN libraries locally, so Google/Facebook-style CDN requests never leave the browser |
+
+Both use `"installation_mode": "normal_installed"`: Firefox installs them on the next start, and
+**you can still disable or remove them** in `about:addons`. Nothing is force-locked — that keeps
+the "reversible" promise and keeps a broken extension from being unremovable.
+
+Because the policy file lives beside the Firefox binary (`/etc/firefox/policies`,
+`Firefox.app/Contents/Resources`, `C:\Program Files\Mozilla Firefox`), installing it needs
+administrator rights once: `sudo` on Linux/macOS, UAC on Windows — the installer asks by itself,
+you never have to remember `-System`. If you would rather not, `--no-extensions` /
+`-NoExtensions` writes the same policy without the two extension entries, and `--profile` /
+`-ProfileOnly` keeps everything inside the profile.
+
+Verify in Firefox: `about:policies` shows *ExtensionSettings* as **Active**, and `about:addons`
+lists uBlock Origin and Decentraleyes within a few seconds of the first start. If the machine is
+offline at that moment, Firefox downloads them on the first start where AMO is reachable.
 
 ### UI: floating new-tab search (Zen / Arc style)
 
@@ -271,7 +304,7 @@ Edits survive reinstalls until you re-run the installer, which rewrites the file
 ### Reverting
 
 ```bash
-python3 scripts/install.py --system --uninstall     # removes what SheepFox installed
+python3 scripts/install.py --system --uninstall     # removes what SheepFox installed (incl. the policy)
 ```
 
 On Windows: `.\scripts\install-windows.bat -Uninstall -System`
@@ -308,11 +341,12 @@ SheepFox-Setup-1.0.0.exe -System -LowMemory
 SheepFox-Setup-1.0.0.exe /?
 ```
 
-`/?` prints the switch list (`-System`, `-Strict`, `-LowMemory`, `-NoUI`,
-`-Doctor`, `-Probe`, `-Unprobe`, `-Report`, `-Uninstall`, `-DryRun`). `-System`
-still auto-elevates through UAC exactly like the `.bat` launcher — there is no
-separate "run as administrator" step, and no PowerShell ExecutionPolicy error
-because the launcher always passes `-ExecutionPolicy Bypass -NoProfile`.
+`/?` prints the switch list (`-ProfileOnly`, `-NoExtensions`, `-System`,
+`-Strict`, `-LowMemory`, `-NoUI`, `-Doctor`, `-Probe`, `-Unprobe`, `-Report`,
+`-Uninstall`, `-DryRun`). A plain double-click installs the policy too, so UAC
+prompts once — that is what preinstalls uBlock Origin and Decentraleyes. There
+is no separate "run as administrator" step, and no PowerShell ExecutionPolicy
+error because the launcher always passes `-ExecutionPolicy Bypass -NoProfile`.
 
 **macOS.** Open the `.dmg` and double-click **Install SheepFox.command**. macOS
 attaches an unsigned build with a quarantine flag, so the first launch may need
